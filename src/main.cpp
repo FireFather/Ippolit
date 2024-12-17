@@ -1,4 +1,3 @@
-
 #include "pragma.h"
 #include "functions.h"
 

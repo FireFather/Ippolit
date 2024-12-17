@@ -1,12 +1,12 @@
 #pragma once
-using castle_moves = enum {
+using castle_moves = enum : uint8_t {
   castle_white_king = 1,
   castle_white_queen = 2,
   castle_black_king = 4,
   castle_black_queen = 8
 };
 
-using KQkq_table = enum {
+using KQkq_table = enum : uint8_t {
   KQkq = castle_white_king | castle_white_queen | castle_black_king | castle_black_queen,
   Qkq = castle_white_queen | castle_black_king | castle_black_queen,
   Kkq = castle_white_king | castle_black_king | castle_black_queen,
@@ -16,7 +16,7 @@ using KQkq_table = enum {
   KQq = castle_white_king | castle_white_queen | castle_black_queen
 };
 
-using pieces = enum {
+using pieces = enum : uint8_t {
   occupied_white,
   white_pawn,
   white_knight,
@@ -35,7 +35,7 @@ using pieces = enum {
   black_queen
 };
 
-using phases = enum {
+using phases = enum : uint8_t {
   trans_value,
   gen_captures,
   capture_moves,
@@ -55,18 +55,18 @@ using phases = enum {
   phase
 };
 
-using squares = enum {
-	a1, b1, c1, d1, e1, f1, g1, h1,
-	a2, b2, c2, d2, e2, f2, g2, h2,
-	a3, b3, c3, d3, e3, f3, g3, h3,
-	a4, b4, c4, d4, e4, f4, g4, h4,
-	a5, b5, c5, d5, e5, f5, g5, h5,
-	a6, b6, c6, d6, e6, f6, g6, h6,
-	a7, b7, c7, d7, e7, f7, g7, h7,
-	a8, b8, c8, d8, e8, f8, g8, h8,
+using squares = enum : uint8_t {
+  a1, b1, c1, d1, e1, f1, g1, h1,
+  a2, b2, c2, d2, e2, f2, g2, h2,
+  a3, b3, c3, d3, e3, f3, g3, h3,
+  a4, b4, c4, d4, e4, f4, g4, h4,
+  a5, b5, c5, d5, e5, f5, g5, h5,
+  a6, b6, c6, d6, e6, f6, g6, h6,
+  a7, b7, c7, d7, e7, f7, g7, h7,
+  a8, b8, c8, d8, e8, f8, g8, h8,
 };
 
-using ranks = enum {
+using ranks = enum : uint8_t {
   rank_1,
   rank_2,
   rank_3,
@@ -77,7 +77,7 @@ using ranks = enum {
   rank_8
 };
 
-using files = enum {
+using files = enum : uint8_t {
   files_a,
   files_b,
   files_c,
@@ -88,7 +88,7 @@ using files = enum {
   files_h
 };
 
-using piece_values = enum {
+using piece_values = enum : uint16_t {
   value_pawn = 100,
   value_knight = 325,
   value_bishop = 325,

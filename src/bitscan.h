@@ -7,7 +7,9 @@
 #endif
 
 #if defined(_WIN64) && !defined(__GNUC__)
-__inline int popcnt(const uint64_t b) { return static_cast<int>(__popcnt64(b)); }
+__inline int popcnt(const uint64_t b) {
+  return static_cast<int>(__popcnt64(b));
+}
 
 __inline unsigned long bsf(const uint64_t x) {
   unsigned long y;

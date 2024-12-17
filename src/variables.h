@@ -1,46 +1,46 @@
 #pragma once
 #include <setjmp.h>
 
-static jmp_buf jbuf;
+inline jmp_buf jbuf;
 
-static uint8_t jump_ok;
-static uint8_t move_easy;
-static uint8_t bad_move;
-static uint8_t move_battle;
-static uint8_t analysis_mode;
-static uint8_t stop_flag;
-static uint8_t new_game;
+inline uint8_t jump_ok;
+inline uint8_t move_easy;
+inline uint8_t bad_move;
+inline uint8_t move_battle;
+inline uint8_t analysis_mode;
+inline uint8_t stop_flag;
+inline uint8_t new_game;
 
-static uint32_t hash_size = 256;
-static uint32_t best_move;
-static uint32_t ponder_move;
+inline uint32_t hash_size = 256;
+inline uint32_t best_move;
+inline uint32_t ponder_move;
 
-static int previous_depth;
-static int ok_immediate;
-static int stack_height;
-static int best_score;
-static int best_score_previous;
-static int best_depth;
-static int depth_limit;
+inline int previous_depth;
+inline int ok_immediate;
+inline int stack_height;
+inline int best_score;
+inline int best_score_previous;
+inline int best_depth;
+inline int depth_limit;
 
-static uint64_t clock_start;
-static uint64_t hash_mask;
-static uint64_t age;
-static uint64_t nodes_white;
-static uint64_t nodes_black;
-static uint64_t nodes_null;
-static uint64_t randkey = 1;
+inline uint64_t clock_start;
+inline uint64_t hash_mask;
+inline uint64_t age;
+inline uint64_t nodes_white;
+inline uint64_t nodes_black;
+inline uint64_t nodes_null;
+inline uint64_t randkey = 1;
+inline uint64_t previous_info;
 
-static int64_t battle_time;
-static int64_t easy_time;
-static int64_t normal_time;
-static int64_t previous_info;
-static int64_t absolute_time;
-static int64_t trouble_time;
-static int64_t increment_time;
+inline int64_t battle_time;
+inline int64_t easy_time;
+inline int64_t normal_time;
+inline int64_t absolute_time;
+inline int64_t trouble_time;
+inline int64_t increment_time;
 
-static type_position* position;
-static type_board board;
+inline type_position* position;
+inline type_board board;
 
-static type_hash* hash_table;
-static type_pawn_hash* pawn_hash_table;
+inline type_hash* hash_table;
+inline type_pawn_hash* pawn_hash_table;

@@ -1,16 +1,20 @@
-#include <cstdio>
+#include <algorithm>
 #include <csetjmp>
-#include <cstring>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <iostream>
+#include <sstream>
+#include <string>
 
 #if !defined(__arm__) && !defined(__linux__)
 #include <windows.h>
 
-uint64_t get_time()
-{
+static uint64_t get_time() {
   constexpr uint64_t y = 1000;
-	const uint64_t x = GetTickCount64() * y;
-	return x;
+  const uint64_t x = GetTickCount64() * y;
+  return x;
 }
 
 #else
@@ -20,8 +24,7 @@ uint64_t get_time()
 #include <stdlib.h>
 #include <sys/time.h>
 
-uint64_t get_time()
-{
+static uint64_t get_time() {
   struct timeval tv;
   gettimeofday(&tv, NULL);
   constexpr uint64_t y = 1000;
@@ -31,73 +34,67 @@ uint64_t get_time()
 
 #include <stdlib.h>
 
-int64_t _atoi64(const char *str) {
-    return atoll(str);
+int64_t _atoi64(const char* str) {
+  return atoll(str);
 }
 
 #endif
 
-#include "pragma.h"
-#include "bitscan.h"
-#include "macros.h"
-#include "enum.h"
-#include "struct.h"
 #include "arrays.h"
+#include "bitscan.h"
 #include "constants.h"
 #include "defines.h"
-#include "variables.h"
-#include "rand.h"
+#include "enum.h"
 #include "functions.h"
+#include "macros.h"
+#include "pragma.h"
+#include "rand.h"
+#include "struct.h"
+#include "variables.h"
 
 #if !defined(__arm__) && !defined(__linux__)
-uint8_t get_input()
-{
+uint8_t get_input() {
+  static int init = 0, is_pipe;
+  static HANDLE stdin_h;
+  DWORD value;
 
-	static int init = 0, is_pipe;
-	static HANDLE stdin_h;
-	DWORD value;
+  if (!init) {
+    init = 1;
+    stdin_h = GetStdHandle(STD_INPUT_HANDLE);
+    is_pipe = !GetConsoleMode(stdin_h, &value);
 
-	if (!init)
-	{
-		init = 1;
-		stdin_h = GetStdHandle(STD_INPUT_HANDLE);
-		is_pipe = !GetConsoleMode(stdin_h, &value);
+    if (!is_pipe) {
+      SetConsoleMode(stdin_h, value & ~(ENABLE_MOUSE_INPUT | ENABLE_WINDOW_INPUT));
+      FlushConsoleInputBuffer(stdin_h);
+    }
+  }
 
-		if (!is_pipe)
-		{
-			SetConsoleMode(stdin_h, value & ~(ENABLE_MOUSE_INPUT | ENABLE_WINDOW_INPUT));
-			FlushConsoleInputBuffer(stdin_h);
-		}
-	}
-
-	if (is_pipe)
-	{
-		if (!PeekNamedPipe(stdin_h, nullptr, 0, nullptr, &value, nullptr))
-			return 1;
-		return value > 0;
-	}
-	GetNumberOfConsoleInputEvents(stdin_h, &value);
-	return value > 1;
-	
+  if (is_pipe) {
+    if (!PeekNamedPipe(stdin_h, nullptr, 0, nullptr, &value, nullptr))
+      return 1;
+    return value > 0;
+  }
+  GetNumberOfConsoleInputEvents(stdin_h, &value);
+  return value > 1;
 }
-	
-	#else
-	struct timeval tv;
-	uint8_t get_input()
-{
-		
-	fd_set readfds;
 
-	FD_ZERO (&readfds);
-	FD_SET (fileno(stdin), &readfds);
-	tv.tv_sec=0; tv.tv_usec=0;
-    select(16, &readfds, 0, 0, &tv);
+#else
+struct timeval tv;
+uint8_t get_input() {
 
-	return (FD_ISSET(fileno(stdin), &readfds));
-	
+  fd_set readfds;
+
+  FD_ZERO(&readfds);
+  FD_SET(fileno(stdin), &readfds);
+  tv.tv_sec = 0; tv.tv_usec = 0;
+  select(16, &readfds, 0, 0, &tv);
+
+  return (FD_ISSET(fileno(stdin), &readfds));
+
 }
 
 #endif
+
 void do_null() {
   nodes_null++;
   position->saved_flags = position->flag;
@@ -138,12 +135,21 @@ char* notate(const uint32_t move, char* string) {
     string[4] = 0;
     return string;
   }
-  sprintf(string, "%c%c%c%c", 'a' + (from & 7), '1' + (from >> 3 & 7), 'a' + (to & 7), '1' + (to >> 3 & 7));
+
+  std::ostringstream oss;
+  oss << static_cast<char>('a' + (from & 7))
+    << static_cast<char>('1' + ((from >> 3) & 7))
+    << static_cast<char>('a' + (to & 7))
+    << static_cast<char>('1' + ((to >> 3) & 7));
 
   if ((move & 070000) >= 040000) {
     const int pr = (move & 070000) >> 12;
-    sprintf(string + 4, "%c", c[pr]);
+    oss << c[pr];
   }
+
+  std::string result = oss.str();
+  std::copy(result.begin(), result.end(), string);
+  string[result.size()] = '\0';
   return string;
 }
 
@@ -251,106 +257,75 @@ void init_game() {
   clear_gain();
 }
 
-void read_fen(const char* string) {
-  int rank = 7, file = 0, c = 0;
+void read_fen(const char* fen_string) {
+  int rank = 7, file = 0;
 
-  for (int i = a1; i <= h8; i++)
+  for (int i = a1; i <= h8; i++) {
     board.square[i] = 0;
+  }
 
-  while (true) {
-    const int piece = string[c++];
+  const char* ptr = fen_string;
 
-    if (piece == 0)
-      return;
-
-    switch (piece) {
-      case '/': rank--;
-        file = 0;
+  while (*ptr) {
+    if (const char piece = *ptr++; piece == '/') {
+      rank--;
+      file = 0;
+    }
+    else if (piece >= '1' && piece <= '8') {
+      file += piece - '0';
+    }
+    else {
+      const int index = file + 8 * rank;
+      switch (piece) {
+      case 'p':
+        board.square[index] = black_pawn;
         break;
-
-      case 'p': board.square[file + 8 * rank] = black_pawn;
-        file++;
+      case 'b':
+        board.square[index] = (square_set[index] & 0xaa55aa55aa55aa55)
+          ? black_king_bishop
+          : black_queen_bishop;
         break;
-
-      case 'b': if (square_set[file + 8 * rank] & 0xaa55aa55aa55aa55)
-          board.square[file + 8 * rank] = black_king_bishop;
-        else
-          board.square[file + 8 * rank] = black_queen_bishop;
-        file++;
+      case 'n':
+        board.square[index] = black_knight;
         break;
-
-      case 'n': board.square[file + 8 * rank] = black_knight;
-        file++;
+      case 'r':
+        board.square[index] = black_rook;
         break;
-
-      case 'r': board.square[file + 8 * rank] = black_rook;
-        file++;
+      case 'q':
+        board.square[index] = black_queen;
         break;
-
-      case 'q': board.square[file + 8 * rank] = black_queen;
-        file++;
+      case 'k':
+        board.square[index] = black_king;
         break;
-
-      case 'k': board.square[file + 8 * rank] = black_king;
-        file++;
+      case 'P':
+        board.square[index] = white_pawn;
         break;
-
-      case 'P': board.square[file + 8 * rank] = white_pawn;
-        file++;
+      case 'B':
+        board.square[index] = (square_set[index] & 0xaa55aa55aa55aa55)
+          ? white_queen_bishop
+          : white_king_bishop;
         break;
-
-      case 'B': if (square_set[file + 8 * rank] & 0xaa55aa55aa55aa55)
-          board.square[file + 8 * rank] = white_queen_bishop;
-        else
-          board.square[file + 8 * rank] = white_king_bishop;
-        file++;
+      case 'N':
+        board.square[index] = white_knight;
         break;
-
-      case 'N': board.square[file + 8 * rank] = white_knight;
-        file++;
+      case 'R':
+        board.square[index] = white_rook;
         break;
-
-      case 'R': board.square[file + 8 * rank] = white_rook;
-        file++;
+      case 'Q':
+        board.square[index] = white_queen;
         break;
-
-      case 'Q': board.square[file + 8 * rank] = white_queen;
-        file++;
+      case 'K':
+        board.square[index] = white_king;
         break;
-
-      case 'K': board.square[file + 8 * rank] = white_king;
-        file++;
+      default:
         break;
-
-      case '1': file += 1;
-        break;
-
-      case '2': file += 2;
-        break;
-
-      case '3': file += 3;
-        break;
-
-      case '4': file += 4;
-        break;
-
-      case '5': file += 5;
-        break;
-
-      case '6': file += 6;
-        break;
-
-      case '7': file += 7;
-        break;
-
-      case '8': file += 8;
-        break;
-
-      default: break;
+      }
+      file++;
     }
 
-    if (rank == 0 && file >= 8)
+    if (rank < 0 || file > 8) {
       break;
+    }
   }
 }
 
@@ -358,107 +333,110 @@ char* write_fen(char* string) {
   char i[1024];
   uint8_t ok = 0;
   int en_passant;
-  sscanf(string, "%s", i);
+
+  std::istringstream stream(string);
+  stream >> i;
+
   read_fen(i);
   memset(root_position, 0, 0x100 * sizeof(type_position));
   position = root_position;
   string += strlen(i) + 1;
-  sscanf(string, "%s", i);
+
+  stream.clear();
+  stream.str(string);
+  stream >> i;
 
   if (i[0] == 'w')
     board.white_to_move = 1;
-
   else if (i[0] == 'b')
     board.white_to_move = 0;
 
   string += strlen(i) + 1;
-  sscanf(string, "%s", i);
-  position->castle = 16;
 
+  stream.clear();
+  stream.str(string);
+  stream >> i;
+
+  position->castle = 16;
   if (!strcmp(i, "KQkq"))
     position->castle = 15;
-
-  if (!strcmp(i, "Qkq"))
+  else if (!strcmp(i, "Qkq"))
     position->castle = 14;
-
-  if (!strcmp(i, "Kkq"))
+  else if (!strcmp(i, "Kkq"))
     position->castle = 13;
-
-  if (!strcmp(i, "kq"))
+  else if (!strcmp(i, "kq"))
     position->castle = 12;
-
-  if (!strcmp(i, "KQq"))
+  else if (!strcmp(i, "KQq"))
     position->castle = 11;
-
-  if (!strcmp(i, "Qq"))
+  else if (!strcmp(i, "Qq"))
     position->castle = 10;
-
-  if (!strcmp(i, "Kq"))
+  else if (!strcmp(i, "Kq"))
     position->castle = 9;
-
-  if (!strcmp(i, "q"))
+  else if (!strcmp(i, "q"))
     position->castle = 8;
-
-  if (!strcmp(i, "KQk"))
+  else if (!strcmp(i, "KQk"))
     position->castle = 7;
-
-  if (!strcmp(i, "Qk"))
+  else if (!strcmp(i, "Qk"))
     position->castle = 6;
-
-  if (!strcmp(i, "Kk"))
+  else if (!strcmp(i, "Kk"))
     position->castle = 5;
-
-  if (!strcmp(i, "k"))
+  else if (!strcmp(i, "k"))
     position->castle = 4;
-
-  if (!strcmp(i, "KQ"))
+  else if (!strcmp(i, "KQ"))
     position->castle = 3;
-
-  if (!strcmp(i, "Q"))
+  else if (!strcmp(i, "Q"))
     position->castle = 2;
-
-  if (!strcmp(i, "K"))
+  else if (!strcmp(i, "K"))
     position->castle = 1;
-
-  if (!strcmp(i, "-"))
+  else if (!strcmp(i, "-"))
     position->castle = 0;
 
   string += strlen(i) + 1;
-  sscanf(string, "%s", i);
-  position->en_passant = 0;
 
-  if (!strcmp(i, "-"))
-    en_passant = 0;
-  else {
+  stream.clear();
+  stream.str(string);
+  stream >> i;
+
+  position->en_passant = 0;
+  if (strcmp(i, "-") != 0) {
     en_passant = i[0] - 'a' + 8 * (i[1] - '1');
     ok = 0;
+  }
+  else {
+    en_passant = 0;
   }
 
   if (en_passant) {
     if (board.white_to_move) {
       if ((en_passant & 7) != files_a && board.square[en_passant - 9] == white_pawn)
         ok = 1;
-
       if ((en_passant & 7) != files_h && board.square[en_passant - 7] == white_pawn)
         ok = 1;
     }
     else {
       if ((en_passant & 7) != files_a && board.square[en_passant + 7] == black_pawn)
         ok = 1;
-
       if ((en_passant & 7) != files_h && board.square[en_passant + 9] == black_pawn)
         ok = 1;
     }
 
     if (ok)
-      position->en_passant = en_passant;
+      position->en_passant = static_cast<uint8_t>(en_passant);
   }
+
   string += strlen(i) + 1;
-  sscanf(string, "%s", i);
-  position->reversible = static_cast<uint8_t>(atoi(i));
+
+  stream.clear();
+  stream.str(string);
+  stream >> i;
+  position->reversible = static_cast<uint8_t>(strtol(i, nullptr, 10));
   string += strlen(i) + 1;
-  sscanf(string, "%s", i);
+
+  stream.clear();
+  stream.str(string);
+  stream >> i;
   string += strlen(i) + 1;
+
   init_bitboards();
   return string;
 }
@@ -485,14 +463,14 @@ uint32_t completed_move(uint32_t x) {
 void read_move(const char* string) {
   type_move_list* move_list;
 
-  while (string[0]) {
-    char T[256];
+  while (*string) {
+    char t[256];
     type_move_list list[256];
     eval_mobility();
 
     if (board.white_to_move
-          ? position->black_attack & board.piece[white_king]
-          : position->white_attack & board.piece[black_king]) {
+      ? position->black_attack & board.piece[white_king]
+      : position->white_attack & board.piece[black_king]) {
       move_list = evasion(list, 0xffffffffffffffff);
       move_list++;
     }
@@ -500,22 +478,37 @@ void read_move(const char* string) {
       move_list = capture(list, board.occupied_total);
       move_list = ordinary(move_list);
     }
+
     uint32_t completion = completed_move(
-      (string[2] - 'a') + ((string[3] - '1') << 3) + ((string[0] - 'a') << 6) + ((string[1] - '1') << 9));
-    sscanf(string, "%s", T);
+      (string[2] - 'a') +
+      ((string[3] - '1') << 3) +
+      ((string[0] - 'a') << 6) +
+      ((string[1] - '1') << 9)
+    );
 
-    if (strlen(T) == 5) {
-      if (string[4] == 'b')
-        completion |= 050000;
+    if (const char* end = strchr(string, ' ')) {
+      const size_t size = end - string;
+      strncpy(t, string, size);
+      t[size] = '\0';
+      string = end + 1;
+    }
+    else {
+      strcpy(t, string);
+      string += strlen(string);
+    }
 
-      if (string[4] == 'n')
-        completion |= 040000;
-
-      if (string[4] == 'r')
-        completion |= 060000;
-
-      if (string[4] == 'q')
-        completion |= 070000;
+    if (strlen(t) == 5) {
+      switch (t[4]) {
+      case 'b': completion |= 050000;
+        break;
+      case 'n': completion |= 040000;
+        break;
+      case 'r': completion |= 060000;
+        break;
+      case 'q': completion |= 070000;
+        break;
+      default:;
+      }
     }
 
     for (int i = 0; i < move_list - list; i++) {
@@ -525,17 +518,19 @@ void read_move(const char* string) {
       }
     }
 
-    string += strlen(T) + 1;
-
-    while (string[0] == ' ')
+    while (*string == ' ') {
       string++;
+    }
   }
 }
 
 void init_position(char* string) {
   char i[1024];
   nodes_white = nodes_black = nodes_null = 0;
-  sscanf(string, "%s", i);
+
+  if (sscanf(string, "%s", i) != 1) {
+    return;
+  }
 
   if (!strcmp(i, "startpos")) {
     write_fen(start_position);
@@ -548,7 +543,9 @@ void init_position(char* string) {
   }
 
   if (string[0]) {
-    sscanf(string, "%s", i);
+    if (sscanf(string, "%s", i) != 1) {
+      return;
+    }
 
     if (!strcmp(i, "moves")) {
       string += strlen("moves") + 1;
@@ -743,7 +740,7 @@ void init_arrays() {
       T = 0;
 
       if (file < 7) {
-        s = 1 << (file + 1);
+        s = static_cast<uint64_t>(1) << (file + 1);
 
         while (s < 256) {
           T |= s;
@@ -756,7 +753,7 @@ void init_arrays() {
       }
 
       if (file > 0) {
-        s = 1 << (file - 1);
+        s = static_cast<uint64_t>(1) << (file - 1);
 
         while (s > 0) {
           T |= s;
@@ -873,9 +870,9 @@ void init_arrays() {
       bitboard_line_obscured[1][right_54[square]][u >> 1] = 0;
 
       if (w < l) {
-        s = 1 << (w + 1);
+        s = static_cast<uint64_t>(1) << (w + 1);
 
-        while (s < 1 << l) {
+        while (s < static_cast<unsigned long long>(1) << l) {
           T |= s;
 
           if (u & s)
@@ -886,7 +883,7 @@ void init_arrays() {
       }
 
       if (w > 0) {
-        s = 1 << (w - 1);
+        s = static_cast<uint64_t>(1) << (w - 1);
 
         while (s > 0) {
           T |= s;
@@ -914,9 +911,9 @@ void init_arrays() {
       bitboard_line_obscured[0][left_54[square]][u >> 1] = 0;
 
       if (w < l) {
-        s = 1 << (w + 1);
+        s = static_cast<uint64_t>(1) << (w + 1);
 
-        while (s < 1 << l) {
+        while (s < static_cast<unsigned long long>(1) << l) {
           T |= s;
 
           if (u & s)
@@ -927,7 +924,7 @@ void init_arrays() {
       }
 
       if (w > 0) {
-        s = 1 << (w - 1);
+        s = static_cast<uint64_t>(1) << (w - 1);
 
         while (s > 0) {
           T |= s;
@@ -1098,19 +1095,19 @@ void init_arrays() {
     diagonal[square] = 0;
 
     for (file = square & 7, rank = square >> 3;
-         file <= files_h && rank <= rank_8; file++, rank++)
+      file <= files_h && rank <= rank_8; file++, rank++)
       diagonal[square] |= static_cast<uint64_t>(1) << (8 * rank + file);
 
     for (file = square & 7, rank = square >> 3;
-         file <= files_h && rank >= rank_1; file++, rank--)
+      file <= files_h && rank >= rank_1; file++, rank--)
       diagonal[square] |= static_cast<uint64_t>(1) << (8 * rank + file);
 
     for (file = square & 7, rank = square >> 3;
-         file >= files_a && rank <= rank_8; file--, rank++)
+      file >= files_a && rank <= rank_8; file--, rank++)
       diagonal[square] |= static_cast<uint64_t>(1) << (8 * rank + file);
 
     for (file = square & 7, rank = square >> 3;
-         file >= files_a && rank >= rank_1; file--, rank--)
+      file >= files_a && rank >= rank_1; file--, rank--)
       diagonal[square] |= static_cast<uint64_t>(1) << (8 * rank + file);
     orthogonal[square] &= square_clear[square];
     diagonal[square] &= square_clear[square];
@@ -1151,7 +1148,7 @@ void age_increase() {
 
 void clear_hash() {
   uint32_t target;
-  const uint32_t size = hash_size * 1024 * 1024 / sizeof(type_hash);
+  const uint32_t size = static_cast<unsigned long long>(hash_size) * 1024 * 1024 / sizeof(type_hash);
 
   for (target = 1; target <= size; target *= 2) {
   }
@@ -1165,7 +1162,7 @@ void clear_hash() {
 
 void init_hash() {
   uint32_t target;
-  const uint32_t size = hash_size * 1024 * 1024 / sizeof(type_hash);
+  const uint32_t size = static_cast<unsigned long long>(hash_size) * 1024 * 1024 / sizeof(type_hash);
 
   for (target = 1; target <= size; target *= 2) {
   }
@@ -1375,8 +1372,8 @@ void hash_exact(int move, const int depth, const int score, const int fl) {
 
         if ((hash->hash_key ^ position->hash_key >> 32) == 0
           && (hash->depth_high >= hash->depth_low
-                ? hash->depth_high
-                : hash->depth_low) <= depth) {
+          ? hash->depth_high
+          : hash->depth_low) <= depth) {
           memset(hash, 0, 16);
           hash->age = age ^ 256 / 2;
         }
@@ -1418,16 +1415,14 @@ void clear_history() {
 }
 
 void uci() {
-  printf("id name %s %s %s\n", ENGINE, VERSION, PLATFORM);
-  printf("id author %s\n", AUTHOR);
-  printf("option name Hash type spin default 256 min 4 max 4096\n");
-  printf("uciok\n");
-  fflush(stdout);
+  std::cout << "id name " << ENGINE << " " << VERSION << " " << PLATFORM << "\n";
+  std::cout << "id author " << AUTHOR << "\n";
+  std::cout << "option name Hash type spin default 256 min 4 max 4096\n";
+  std::cout << "uciok\n" << std::flush;
 }
 
 void readyok() {
-  printf("readyok\n");
-  fflush(stdout);
+  std::cout << "readyok\n" << std::flush;
 }
 
 void parse(char* string) {
@@ -1451,7 +1446,7 @@ void parse(char* string) {
     init_game();
   }
 
-  if (!memcmp(string, "setoption", 9)) {
+  if (!strncmp(string, "setoption", 9)) {
     halt_search();
     const char* name = strstr(string, "name ");
     char* value = strstr(string, "value ");
@@ -1462,22 +1457,23 @@ void parse(char* string) {
     name += 5;
     value += 6;
 
-    if (!memcmp(name, "Hash", 4)) {
-      hash_size = atoi(value);
-
-      if (hash_size >= 4 && hash_size <= 2048) { init_hash(); }
+    if (!strncmp(name, "Hash", 4)) {
+      char* endptr = nullptr;
+      const long temp = strtol(value, &endptr, 10);
+      hash_size = static_cast<int>(temp);
+      init_hash();
     }
   }
 
   if (jump_ok)
     return;
 
-  if (!memcmp(string, "go", 2)) {
+  if (!strncmp(string, "go", 2)) {
     setup_search(string);
     search();
   }
 
-  if (!memcmp(string, "position", 8))
+  if (!strncmp(string, "position", 8))
     init_position(string + 9);
 
   if (!strcmp(string, "uci"))
@@ -1485,14 +1481,21 @@ void parse(char* string) {
 }
 
 void engine_info() {
-  const auto startup_banner = "" ENGINE " " VERSION " " PLATFORM "\n\n";
-  printf(startup_banner);
+  const auto startup_banner = std::string(ENGINE) + " " + VERSION + " " + PLATFORM + "\n\n";
+  std::cout << startup_banner;
 }
 
 void read_input() {
   char string[2048];
-  fgets(string, 2048, stdin);
-  string[strlen(string) - 1] = 0;
+
+  if (fgets(string, 2048, stdin) == nullptr) {
+    return;
+  }
+
+  if (const size_t len = strlen(string); len > 0 && string[len - 1] == '\n') {
+    string[len - 1] = 0;
+  }
+
   parse(string);
 }
 
@@ -1515,8 +1518,9 @@ void send_info(const uint64_t x) {
   else
     speed = nodes / time * 1000;
 
-  printf("info time %llu nodes %llu nps %llu\n", time, nodes, speed);
-  fflush(stdout);
+  std::cout << "info time " << time
+    << " nodes " << nodes
+    << " nps " << speed << "\n" << std::flush;
 }
 
 void check_if_done(const int g) {
@@ -1554,47 +1558,60 @@ END:
     read_input();
 }
 
-void setup_search(char* string) {
-  int64_t white_time = 0xfffffffffffffff, black_time = 0xfffffffffffffff, white_increment = 0, black_increment = 0;
+void setup_search(const char* string) {
+  int64_t white_time = 0xfffffffffffffff, black_time = 0xfffffffffffffff;
+  int64_t white_increment = 0, black_increment = 0;
 
   depth_limit = 255;
   absolute_time = trouble_time = 0xfffffffffffffff;
   stop_flag = 0;
   previous_info = 0;
-  const char* p = strtok(string, " ");
 
-  for (p = strtok(nullptr, " "); p != nullptr; p = strtok(nullptr, " ")) {
-    if (!strcmp(p, "depth")) {
-      p = strtok(nullptr, " ");
-      depth_limit = 1 >= atoi(p) ? 1 : atoi(p);
+  std::istringstream iss(string);
+  std::string token;
+
+  while (iss >> token) {
+    if (token == "depth") {
+      if (iss >> token) {
+        int parsed_value = std::stoi(token);
+        depth_limit = std::max<int>(1, parsed_value);
+      }
     }
-    else if (!strcmp(p, "movetime")) {
-      p = strtok(nullptr, " ");
-      absolute_time = (1 >= atoi(p) ? 1 : atoi(p)) * 1000;
+    else if (token == "movetime") {
+      if (iss >> token) {
+        int64_t parsed_value = std::stoi(token);
+        absolute_time = std::max<int64_t>(1, parsed_value) * 1000;
+      }
     }
-    else if (!strcmp(p, "wtime")) {
-      p = strtok(nullptr, " ");
-      white_time = _atoi64(p) * 1000;
+    else if (token == "wtime") {
+      if (iss >> token) {
+        white_time = std::stoll(token) * 1000;
+      }
     }
-    else if (!strcmp(p, "btime")) {
-      p = strtok(nullptr, " ");
-      black_time = _atoi64(p) * 1000;
+    else if (token == "btime") {
+      if (iss >> token) {
+        black_time = std::stoll(token) * 1000;
+      }
     }
-    else if (!strcmp(p, "winc")) {
-      p = strtok(nullptr, " ");
-      white_increment = _atoi64(p) * 1000;
+    else if (token == "winc") {
+      if (iss >> token) {
+        white_increment = std::stoll(token) * 1000;
+      }
     }
-    else if (!strcmp(p, "binc")) {
-      p = strtok(nullptr, " ");
-      black_increment = _atoi64(p) * 1000;
+    else if (token == "binc") {
+      if (iss >> token) {
+        black_increment = std::stoll(token) * 1000;
+      }
     }
-    else if (!strcmp(p, "ponder") || !strcmp(p, "infinite")) {
+    else if (token == "ponder" || token == "infinite") {
+      // These tokens are recognized but do nothing
     }
   }
 
   battle_time = 0xfffffffffffffff;
   normal_time = 0xfffffffffffffff;
   easy_time = 0xfffffffffffffff;
+
   const int64_t temp = board.white_to_move ? white_time : black_time;
 
   if (temp == 0xfffffffffffffff)
@@ -1603,16 +1620,11 @@ void setup_search(char* string) {
   increment_time = board.white_to_move ? white_increment : black_increment;
   absolute_time = temp / 2 - 10000;
 
-  if (absolute_time < 5000)
-    absolute_time = 5000;
-
+  absolute_time = std::max<int64_t>(absolute_time, 5000);
   trouble_time = absolute_time / 22 + increment_time;
 
-  if (trouble_time > absolute_time)
-    trouble_time = absolute_time;
-
-  if (trouble_time < 5000)
-    trouble_time = 5000;
+  trouble_time = std::min<int64_t>(trouble_time, absolute_time);
+  trouble_time = std::max<int64_t>(trouble_time, 5000);
 
   easy_time = trouble_time / 4;
   battle_time = trouble_time;
@@ -1627,24 +1639,27 @@ END:
 
 void output_move() {
   if (!best_move) {
-    printf("bestmove NULL\n");
-    fflush(stdout);
+    std::cout << "bestmove NULL\n" << std::flush;
     return;
   }
 
-  printf("bestmove %s ponder %s\n", notate(best_move, string_1), notate(ponder_move, string_2));
-  fflush(stdout);
+  std::cout << "bestmove " << notate(best_move, string_1)
+    << " ponder " << notate(ponder_move, string_2) << "\n" << std::flush;
 }
 
 char* cp_or_mate(const int score, char* s) {
+  std::ostringstream oss;
+
   if (score > 30000 - 1024)
-    sprintf(s, "mate %d", (30000 + 1 - score) / 2);
-
+    oss << "mate " << (30000 + 1 - score) / 2;
   else if (score < -30000 + 1024)
-    sprintf(s, "mate %d", (-30000 - score) / 2);
-
+    oss << "mate " << (-30000 - score) / 2;
   else
-    sprintf(s, "cp %d", score);
+    oss << "cp " << score;
+
+  std::string result = oss.str();
+  std::copy(result.begin(), result.end(), s);
+  s[result.size()] = '\0';
   return s;
 }
 
@@ -1724,9 +1739,12 @@ void information(const uint64_t x, const int score) {
       undo(position->move);
   }
 
-  printf("info time %llu nodes %llu nps %llu score %s depth %d pv %s\n",
-         time, nodes, speed, cp_or_mate(score, string_2), best_depth / 2, pv);
-  fflush(stdout); // NOLINT(cert-err33-c)
+  std::cout << "info time " << time
+    << " nodes " << nodes
+    << " nps " << speed
+    << " score " << cp_or_mate(score, string_2)
+    << " depth " << best_depth / 2
+    << " pv " << pv << "\n" << std::flush;
 }
 
 void search() {
@@ -1784,11 +1802,11 @@ void search() {
 }
 
 int init_flags(const int white_pawn_count, const int white_knight_count, const int white_bishop_count,
-               const int white_bishop_count_1,
-               const int white_bishop_count_2, const int white_rook_count, const int white_queen_count,
-               const int black_pawn_count, const int black_knight_count,
-               const int black_bishop_count, const int black_bishop_count_1, const int black_bishop_count_2,
-               const int black_rook_count, const int black_queen_count) {
+  const int white_bishop_count_1,
+  const int white_bishop_count_2, const int white_rook_count, const int white_queen_count,
+  const int black_pawn_count, const int black_knight_count,
+  const int black_bishop_count, const int black_bishop_count_1, const int black_bishop_count_2,
+  const int black_rook_count, const int black_queen_count) {
   uint8_t flags = (white_knight_count || white_bishop_count || white_queen_count || white_rook_count) << 1
     | (black_knight_count || black_bishop_count || black_queen_count || black_rook_count) << 0;
 
@@ -1851,11 +1869,11 @@ int init_flags(const int white_pawn_count, const int white_knight_count, const i
 }
 
 int init_weights(const int white_pawn_count, const int white_knight_count, const int white_bishop_count,
-                 const int white_bishop_count_1,
-                 const int white_bishop_count_2, const int white_rook_count, const int white_queen_count,
-                 const int black_pawn_count, const int black_knight_count,
-                 const int black_bishop_count, const int black_bishop_count_1, const int black_bishop_count_2,
-                 const int black_rook_count, const int black_queen_count) {
+  const int white_bishop_count_1,
+  const int white_bishop_count_2, const int white_rook_count, const int white_queen_count,
+  const int black_pawn_count, const int black_knight_count,
+  const int black_bishop_count, const int black_bishop_count_1, const int black_bishop_count_2,
+  const int black_rook_count, const int black_queen_count) {
   int token = 0x80;
 
   if (white_knight_count == 0 && black_knight_count == 0 && white_bishop_count == 0 && black_bishop_count == 0
@@ -1865,14 +1883,14 @@ int init_weights(const int white_pawn_count, const int white_knight_count, const
   if (white_knight_count == 0 && black_knight_count == 0 && white_bishop_count == 0 && black_bishop_count == 0
     && white_queen_count == 0 && black_queen_count == 0 && white_rook_count == 1 && black_rook_count == 1)
     token =
-      0x60 + 2 * (white_pawn_count >= black_pawn_count ? white_pawn_count : black_pawn_count);
+    0x60 + 2 * (white_pawn_count >= black_pawn_count ? white_pawn_count : black_pawn_count);
 
   if (white_knight_count == 0 && black_knight_count == 0 && white_rook_count == 0 && black_rook_count == 0
     && white_queen_count == 0 && black_queen_count == 0 && white_bishop_count == 1 && black_bishop_count == 1) {
     if ((white_bishop_count_1 == 1 && white_bishop_count_2 == 0 && black_bishop_count_1 == 0 && black_bishop_count_2
-        == 1)
+      == 1)
       || (white_bishop_count_1 == 0 && white_bishop_count_2 == 1 && black_bishop_count_1 == 1 &&
-        black_bishop_count_2 == 0))
+      black_bishop_count_2 == 0))
       token = 0x30 + 4 * (white_pawn_count >= black_pawn_count ? white_pawn_count : black_pawn_count);
     else
       token = 0x78 + 2 * (white_pawn_count >= black_pawn_count ? white_pawn_count : black_pawn_count);
@@ -1889,20 +1907,20 @@ int init_weights(const int white_pawn_count, const int white_knight_count, const
   if (white_knight_count == 0 && black_knight_count == 0 && white_bishop_count == 1 && black_bishop_count == 1
     && white_queen_count == 0 && black_queen_count == 0 && white_rook_count == 1 && black_rook_count == 1) {
     if ((white_bishop_count_1 == 1 && white_bishop_count_2 == 0 && black_bishop_count_1 == 0 && black_bishop_count_2
-        == 1)
+      == 1)
       || (white_bishop_count_1 == 0 && white_bishop_count_2 == 1 && black_bishop_count_1 == 1 &&
-        black_bishop_count_2 == 0))
+      black_bishop_count_2 == 0))
       token = 0x70 + (white_pawn_count >= black_pawn_count ? white_pawn_count : black_pawn_count);
   }
   return token;
 }
 
 int calc_white_weights(int white_pawn_count, int white_knight_count, int white_bishop_count,
-                       int white_bishop_count_1,
-                       int white_bishop_count_2, int white_rook_count, int white_queen_count,
-                       int black_pawn_count, int black_knight_count,
-                       int black_bishop_count, int black_bishop_count_1, int black_bishop_count_2,
-                       int black_rook_count, int black_queen_count) {
+  int white_bishop_count_1,
+  int white_bishop_count_2, int white_rook_count, int white_queen_count,
+  int black_pawn_count, int black_knight_count,
+  int black_bishop_count, int black_bishop_count_1, int black_bishop_count_2,
+  int black_rook_count, int black_queen_count) {
   int white_minor_count, black_minor_count, white_phase, black_phase, white_weight, white_value, black_value;
   white_minor_count = white_bishop_count + white_knight_count;
   black_minor_count = black_bishop_count + black_knight_count;
@@ -2221,11 +2239,11 @@ int calc_white_weights(int white_pawn_count, int white_knight_count, int white_b
 }
 
 int calc_black_weights(int white_pawn_count, int white_knight_count, int white_bishop_count,
-                       int white_bishop_count_1,
-                       int white_bishop_count_2, int white_rook_count, int white_queen_count,
-                       int black_pawn_count, int black_knight_count,
-                       int black_bishop_count, int black_bishop_count_1, int black_bishop_count_2,
-                       int black_rook_count, int black_queen_count) {
+  int white_bishop_count_1,
+  int white_bishop_count_2, int white_rook_count, int white_queen_count,
+  int black_pawn_count, int black_knight_count,
+  int black_bishop_count, int black_bishop_count_1, int black_bishop_count_2,
+  int black_rook_count, int black_queen_count) {
   int white_minor_count, black_minor_count, white_phase, black_phase, black_weight, white_value, black_value;
   white_minor_count = white_bishop_count + white_knight_count;
   black_minor_count = black_bishop_count + black_knight_count;
@@ -2544,10 +2562,10 @@ int calc_black_weights(int white_pawn_count, int white_knight_count, int white_b
 }
 
 uint64_t compute_material_value(const int white_pawn_count, const int white_knight_count,
-                                const int white_bishop_count, const int white_rook_count,
-                                const int white_queen_count, const int black_pawn_count,
-                                const int black_knight_count, const int black_bishop_count,
-                                const int black_rook_count, const int black_queen_count) {
+  const int white_bishop_count, const int white_rook_count,
+  const int white_queen_count, const int black_pawn_count,
+  const int black_knight_count, const int black_bishop_count,
+  const int black_rook_count, const int black_queen_count) {
   uint64_t value = 0;
   value += (white_bishop_count / 2 - black_bishop_count / 2) * mat_bishop_pair_value;
   value += (white_pawn_count - black_pawn_count) * mat_pawn_value;
@@ -2568,11 +2586,11 @@ uint64_t compute_material_value(const int white_pawn_count, const int white_knig
   if (black_queen_count + black_rook_count >= 2)
     value += mat_queen_rook_penalty;
 
-  value += (white_pawn_count - 5) * white_knight_count * mat_knight_pawn_bonus;
-  value -= (black_pawn_count - 5) * black_knight_count * mat_knight_pawn_bonus;
+  value += (static_cast<unsigned long long>(white_pawn_count) - 5) * white_knight_count * mat_knight_pawn_bonus;
+  value -= (static_cast<unsigned long long>(black_pawn_count) - 5) * black_knight_count * mat_knight_pawn_bonus;
 
-  value -= (white_pawn_count - 5) * white_rook_count * mat_rook_pawn_penalty;
-  value += (black_pawn_count - 5) * black_rook_count * mat_rook_pawn_penalty;
+  value -= (static_cast<unsigned long long>(white_pawn_count) - 5) * white_rook_count * mat_rook_pawn_penalty;
+  value += (static_cast<unsigned long long>(black_pawn_count) - 5) * black_rook_count * mat_rook_pawn_penalty;
 
   return value;
 }
@@ -2607,9 +2625,9 @@ void calculate_material_value(const int c) {
   const int white_bishop_count = white_bishop_count_1 + white_bishop_count_2;
   const int black_bishop_count = black_bishop_count_1 + black_bishop_count_2;
   uint64_t value = compute_material_value(white_pawn_count, white_knight_count, white_bishop_count, white_rook_count,
-                                          white_queen_count,
-                                          black_pawn_count, black_knight_count, black_bishop_count, black_rook_count,
-                                          black_queen_count);
+    white_queen_count,
+    black_pawn_count, black_knight_count, black_bishop_count, black_rook_count,
+    black_queen_count);
   const int phase = 1 * (white_knight_count + white_bishop_count + black_knight_count + black_bishop_count)
     + 3 * (white_rook_count + black_rook_count) + 6 * (white_queen_count + black_queen_count);
   int p1 = value & 0xffff;
@@ -2640,19 +2658,19 @@ void calculate_material_value(const int c) {
     count_value = static_cast<int>(value) / 8;
   }
   const int white_weight = calc_white_weights(white_pawn_count, white_knight_count, white_bishop_count,
-                                              white_bishop_count_1,
-                                              white_bishop_count_2,
-                                              white_rook_count, white_queen_count, black_pawn_count, black_knight_count,
-                                              black_bishop_count,
-                                              black_bishop_count_1, black_bishop_count_2, black_rook_count,
-                                              black_queen_count);
+    white_bishop_count_1,
+    white_bishop_count_2,
+    white_rook_count, white_queen_count, black_pawn_count, black_knight_count,
+    black_bishop_count,
+    black_bishop_count_1, black_bishop_count_2, black_rook_count,
+    black_queen_count);
   const int black_weight = calc_black_weights(white_pawn_count, white_knight_count, white_bishop_count,
-                                              white_bishop_count_1,
-                                              white_bishop_count_2,
-                                              white_rook_count, white_queen_count, black_pawn_count, black_knight_count,
-                                              black_bishop_count,
-                                              black_bishop_count_1, black_bishop_count_2, black_rook_count,
-                                              black_queen_count);
+    white_bishop_count_1,
+    white_bishop_count_2,
+    white_rook_count, white_queen_count, black_pawn_count, black_knight_count,
+    black_bishop_count,
+    black_bishop_count_1, black_bishop_count_2, black_rook_count,
+    black_queen_count);
 
   if (count_value > 0)
     weight = white_weight;
@@ -2663,17 +2681,17 @@ void calculate_material_value(const int c) {
 
   material_table[c].value = count_value;
   material_table[c].token = init_weights(white_pawn_count, white_knight_count,
-                                         white_bishop_count, white_bishop_count_1, white_bishop_count_2,
-                                         white_rook_count, white_queen_count,
-                                         black_pawn_count, black_knight_count, black_bishop_count,
-                                         black_bishop_count_1, black_bishop_count_2,
-                                         black_rook_count, black_queen_count);
+    white_bishop_count, white_bishop_count_1, white_bishop_count_2,
+    white_rook_count, white_queen_count,
+    black_pawn_count, black_knight_count, black_bishop_count,
+    black_bishop_count_1, black_bishop_count_2,
+    black_rook_count, black_queen_count);
   material_table[c].flag = init_flags(white_pawn_count, white_knight_count, white_bishop_count,
-                                      white_bishop_count_1, white_bishop_count_2, white_rook_count, white_queen_count,
-                                      black_pawn_count,
-                                      black_knight_count, black_bishop_count, black_bishop_count_1,
-                                      black_bishop_count_2, black_rook_count,
-                                      black_queen_count);
+    white_bishop_count_1, white_bishop_count_2, white_rook_count, white_queen_count,
+    black_pawn_count,
+    black_knight_count, black_bishop_count, black_bishop_count_1,
+    black_bishop_count_2, black_rook_count,
+    black_queen_count);
 }
 
 void init_material() {
@@ -2682,111 +2700,111 @@ void init_material() {
 }
 
 void init_captures() {
-  capture_value[white_pawn][black_queen] = (0xd0 << 24) + (0x02 << 20);
-  capture_value[white_knight][black_queen] = (0xcf << 24) + (0x02 << 20);
-  capture_value[white_king_bishop][black_queen] = (0xce << 24) + (0x02 << 20);
-  capture_value[white_queen_bishop][black_queen] = (0xce << 24) + (0x02 << 20);
-  capture_value[white_rook][black_queen] = (0xcd << 24) + (0x02 << 20);
-  capture_value[white_queen][black_queen] = (0xcc << 24) + (0x01 << 20);
+  capture_value[white_pawn][black_queen] = (static_cast<uint32_t>(0xd0) << 24) + (0x02 << 20);
+  capture_value[white_knight][black_queen] = (static_cast<uint32_t>(0xcf) << 24) + (0x02 << 20);
+  capture_value[white_king_bishop][black_queen] = (static_cast<uint32_t>(0xce) << 24) + (0x02 << 20);
+  capture_value[white_queen_bishop][black_queen] = (static_cast<uint32_t>(0xce) << 24) + (0x02 << 20);
+  capture_value[white_rook][black_queen] = (static_cast<uint32_t>(0xcd) << 24) + (0x02 << 20);
+  capture_value[white_queen][black_queen] = (static_cast<uint32_t>(0xcc) << 24) + (0x01 << 20);
 
-  capture_value[white_pawn][black_rook] = (0xc8 << 24) + (0x02 << 20);
-  capture_value[white_knight][black_rook] = (0xc7 << 24) + (0x02 << 20);
-  capture_value[white_king_bishop][black_rook] = (0xc6 << 24) + (0x02 << 20);
-  capture_value[white_queen_bishop][black_rook] = (0xc6 << 24) + (0x02 << 20);
-  capture_value[white_rook][black_rook] = (0xc5 << 24) + (0x01 << 20);
-  capture_value[white_queen][black_rook] = (0xc4 << 24) + (0x00 << 20);
+  capture_value[white_pawn][black_rook] = (static_cast<uint32_t>(0xc8) << 24) + (0x02 << 20);
+  capture_value[white_knight][black_rook] = (static_cast<uint32_t>(0xc7) << 24) + (0x02 << 20);
+  capture_value[white_king_bishop][black_rook] = (static_cast<uint32_t>(0xc6) << 24) + (0x02 << 20);
+  capture_value[white_queen_bishop][black_rook] = (static_cast<uint32_t>(0xc6) << 24) + (0x02 << 20);
+  capture_value[white_rook][black_rook] = (static_cast<uint32_t>(0xc5) << 24) + (0x01 << 20);
+  capture_value[white_queen][black_rook] = (static_cast<uint32_t>(0xc4) << 24) + (0x00 << 20);
 
-  capture_value[white_pawn][black_queen_bishop] = (0xc0 << 24) + (0x02 << 20);
-  capture_value[white_knight][black_queen_bishop] = (0xbf << 24) + (0x01 << 20);
-  capture_value[white_king_bishop][black_queen_bishop] = (0xbe << 24) + (0x01 << 20);
-  capture_value[white_queen_bishop][black_queen_bishop] = (0xbe << 24) + (0x01 << 20);
-  capture_value[white_rook][black_queen_bishop] = (0xbd << 24) + (0x00 << 20);
-  capture_value[white_queen][black_queen_bishop] = (0xbc << 24) + (0x00 << 20);
+  capture_value[white_pawn][black_queen_bishop] = (static_cast<uint32_t>(0xc0) << 24) + (0x02 << 20);
+  capture_value[white_knight][black_queen_bishop] = (static_cast<uint32_t>(0xbf) << 24) + (0x01 << 20);
+  capture_value[white_king_bishop][black_queen_bishop] = (static_cast<uint32_t>(0xbe) << 24) + (0x01 << 20);
+  capture_value[white_queen_bishop][black_queen_bishop] = (static_cast<uint32_t>(0xbe) << 24) + (0x01 << 20);
+  capture_value[white_rook][black_queen_bishop] = (static_cast<uint32_t>(0xbd) << 24) + (0x00 << 20);
+  capture_value[white_queen][black_queen_bishop] = (static_cast<uint32_t>(0xbc) << 24) + (0x00 << 20);
 
-  capture_value[white_pawn][black_king_bishop] = (0xc0 << 24) + (0x02 << 20);
-  capture_value[white_knight][black_king_bishop] = (0xbf << 24) + (0x01 << 20);
-  capture_value[white_king_bishop][black_king_bishop] = (0xbe << 24) + (0x01 << 20);
-  capture_value[white_queen_bishop][black_king_bishop] = (0xbe << 24) + (0x01 << 20);
-  capture_value[white_rook][black_king_bishop] = (0xbd << 24) + (0x00 << 20);
-  capture_value[white_queen][black_king_bishop] = (0xbc << 24) + (0x00 << 20);
+  capture_value[white_pawn][black_king_bishop] = (static_cast<uint32_t>(0xc0) << 24) + (0x02 << 20);
+  capture_value[white_knight][black_king_bishop] = (static_cast<uint32_t>(0xbf) << 24) + (0x01 << 20);
+  capture_value[white_king_bishop][black_king_bishop] = (static_cast<uint32_t>(0xbe) << 24) + (0x01 << 20);
+  capture_value[white_queen_bishop][black_king_bishop] = (static_cast<uint32_t>(0xbe) << 24) + (0x01 << 20);
+  capture_value[white_rook][black_king_bishop] = (static_cast<uint32_t>(0xbd) << 24) + (0x00 << 20);
+  capture_value[white_queen][black_king_bishop] = (static_cast<uint32_t>(0xbc) << 24) + (0x00 << 20);
 
-  capture_value[white_pawn][black_knight] = (0xb8 << 24) + (0x02 << 20);
-  capture_value[white_knight][black_knight] = (0xb7 << 24) + (0x01 << 20);
-  capture_value[white_king_bishop][black_knight] = (0xb6 << 24) + (0x01 << 20);
-  capture_value[white_queen_bishop][black_knight] = (0xb6 << 24) + (0x01 << 20);
-  capture_value[white_rook][black_knight] = (0xb5 << 24) + (0x00 << 20);
-  capture_value[white_queen][black_knight] = (0xb4 << 24) + (0x00 << 20);
+  capture_value[white_pawn][black_knight] = (static_cast<uint32_t>(0xb8) << 24) + (0x02 << 20);
+  capture_value[white_knight][black_knight] = (static_cast<uint32_t>(0xb7) << 24) + (0x01 << 20);
+  capture_value[white_king_bishop][black_knight] = (static_cast<uint32_t>(0xb6) << 24) + (0x01 << 20);
+  capture_value[white_queen_bishop][black_knight] = (static_cast<uint32_t>(0xb6) << 24) + (0x01 << 20);
+  capture_value[white_rook][black_knight] = (static_cast<uint32_t>(0xb5) << 24) + (0x00 << 20);
+  capture_value[white_queen][black_knight] = (static_cast<uint32_t>(0xb4) << 24) + (0x00 << 20);
 
-  capture_value[white_pawn][black_pawn] = (0xb0 << 24) + (0x01 << 20);
-  capture_value[white_knight][black_pawn] = (0xaf << 24) + (0x00 << 20);
-  capture_value[white_king_bishop][black_pawn] = (0xae << 24) + (0x00 << 20);
-  capture_value[white_queen_bishop][black_pawn] = (0xae << 24) + (0x00 << 20);
-  capture_value[white_rook][black_pawn] = (0xad << 24) + (0x00 << 20);
-  capture_value[white_queen][black_pawn] = (0xac << 24) + (0x00 << 20);
+  capture_value[white_pawn][black_pawn] = (static_cast<uint32_t>(0xb0) << 24) + (0x01 << 20);
+  capture_value[white_knight][black_pawn] = (static_cast<uint32_t>(0xaf) << 24) + (0x00 << 20);
+  capture_value[white_king_bishop][black_pawn] = (static_cast<uint32_t>(0xae) << 24) + (0x00 << 20);
+  capture_value[white_queen_bishop][black_pawn] = (static_cast<uint32_t>(0xae) << 24) + (0x00 << 20);
+  capture_value[white_rook][black_pawn] = (static_cast<uint32_t>(0xad) << 24) + (0x00 << 20);
+  capture_value[white_queen][black_pawn] = (static_cast<uint32_t>(0xac) << 24) + (0x00 << 20);
 
-  capture_value[white_king][black_queen] = (0xcb << 24) + (0x00 << 20);
-  capture_value[white_king][black_rook] = (0xc3 << 24) + (0x00 << 20);
-  capture_value[white_king][black_queen_bishop] = (0xbb << 24) + (0x00 << 20);
-  capture_value[white_king][black_king_bishop] = (0xbb << 24) + (0x00 << 20);
-  capture_value[white_king][black_knight] = (0xb3 << 24) + (0x00 << 20);
-  capture_value[white_king][black_pawn] = (0xab << 24) + (0x00 << 20);
+  capture_value[white_king][black_queen] = (static_cast<uint32_t>(0xcb) << 24) + (0x00 << 20);
+  capture_value[white_king][black_rook] = (static_cast<uint32_t>(0xc3) << 24) + (0x00 << 20);
+  capture_value[white_king][black_queen_bishop] = (static_cast<uint32_t>(0xbb) << 24) + (0x00 << 20);
+  capture_value[white_king][black_king_bishop] = (static_cast<uint32_t>(0xbb) << 24) + (0x00 << 20);
+  capture_value[white_king][black_knight] = (static_cast<uint32_t>(0xb3) << 24) + (0x00 << 20);
+  capture_value[white_king][black_pawn] = (static_cast<uint32_t>(0xab) << 24) + (0x00 << 20);
 
-  capture_value[white_king][0] = (0x07 << 24) + (0x00 << 15);
-  capture_value[white_pawn][0] = (0x06 << 24) + (0x01 << 15);
-  capture_value[white_knight][0] = (0x05 << 24) + (0x01 << 15);
-  capture_value[white_king_bishop][0] = (0x04 << 24) + (0x01 << 15);
-  capture_value[white_queen_bishop][0] = (0x04 << 24) + (0x01 << 15);
-  capture_value[white_rook][0] = (0x03 << 24) + (0x01 << 15);
-  capture_value[white_queen][0] = (0x02 << 24) + (0x01 << 15);
+  capture_value[white_king][0] = (static_cast<uint32_t>(0x07) << 24) + (0x00 << 15);
+  capture_value[white_pawn][0] = (static_cast<uint32_t>(0x06) << 24) + (0x01 << 15);
+  capture_value[white_knight][0] = (static_cast<uint32_t>(0x05) << 24) + (0x01 << 15);
+  capture_value[white_king_bishop][0] = (static_cast<uint32_t>(0x04) << 24) + (0x01 << 15);
+  capture_value[white_queen_bishop][0] = (static_cast<uint32_t>(0x04) << 24) + (0x01 << 15);
+  capture_value[white_rook][0] = (static_cast<uint32_t>(0x03) << 24) + (0x01 << 15);
+  capture_value[white_queen][0] = (static_cast<uint32_t>(0x02) << 24) + (0x01 << 15);
 
-  capture_value[black_pawn][white_queen] = (0xd0 << 24) + (0x02 << 20);
-  capture_value[black_knight][white_queen] = (0xcf << 24) + (0x02 << 20);
-  capture_value[black_queen_bishop][white_queen] = (0xce << 24) + (0x02 << 20);
-  capture_value[black_king_bishop][white_queen] = (0xce << 24) + (0x02 << 20);
-  capture_value[black_rook][white_queen] = (0xcd << 24) + (0x02 << 20);
-  capture_value[black_queen][white_queen] = (0xcc << 24) + (0x01 << 20);
+  capture_value[black_pawn][white_queen] = (static_cast<uint32_t>(0xd0) << 24) + (0x02 << 20);
+  capture_value[black_knight][white_queen] = (static_cast<uint32_t>(0xcf) << 24) + (0x02 << 20);
+  capture_value[black_queen_bishop][white_queen] = (static_cast<uint32_t>(0xce) << 24) + (0x02 << 20);
+  capture_value[black_king_bishop][white_queen] = (static_cast<uint32_t>(0xce) << 24) + (0x02 << 20);
+  capture_value[black_rook][white_queen] = (static_cast<uint32_t>(0xcd) << 24) + (0x02 << 20);
+  capture_value[black_queen][white_queen] = (static_cast<uint32_t>(0xcc) << 24) + (0x01 << 20);
 
-  capture_value[black_pawn][white_rook] = (0xc8 << 24) + (0x02 << 20);
-  capture_value[black_knight][white_rook] = (0xc7 << 24) + (0x02 << 20);
-  capture_value[black_queen_bishop][white_rook] = (0xc6 << 24) + (0x02 << 20);
-  capture_value[black_king_bishop][white_rook] = (0xc6 << 24) + (0x02 << 20);
-  capture_value[black_rook][white_rook] = (0xc5 << 24) + (0x01 << 20);
-  capture_value[black_queen][white_rook] = (0xc4 << 24) + (0x00 << 20);
+  capture_value[black_pawn][white_rook] = (static_cast<uint32_t>(0xc8) << 24) + (0x02 << 20);
+  capture_value[black_knight][white_rook] = (static_cast<uint32_t>(0xc7) << 24) + (0x02 << 20);
+  capture_value[black_queen_bishop][white_rook] = (static_cast<uint32_t>(0xc6) << 24) + (0x02 << 20);
+  capture_value[black_king_bishop][white_rook] = (static_cast<uint32_t>(0xc6) << 24) + (0x02 << 20);
+  capture_value[black_rook][white_rook] = (static_cast<uint32_t>(0xc5) << 24) + (0x01 << 20);
+  capture_value[black_queen][white_rook] = (static_cast<uint32_t>(0xc4) << 24) + (0x00 << 20);
 
-  capture_value[black_pawn][white_king_bishop] = (0xc0 << 24) + (0x02 << 20);
-  capture_value[black_knight][white_king_bishop] = (0xbf << 24) + (0x01 << 20);
-  capture_value[black_queen_bishop][white_king_bishop] = (0xbe << 24) + (0x01 << 20);
-  capture_value[black_king_bishop][white_king_bishop] = (0xbe << 24) + (0x01 << 20);
-  capture_value[black_rook][white_king_bishop] = (0xbd << 24) + (0x00 << 20);
-  capture_value[black_queen][white_king_bishop] = (0xbc << 24) + (0x00 << 20);
+  capture_value[black_pawn][white_king_bishop] = (static_cast<uint32_t>(0xc0) << 24) + (0x02 << 20);
+  capture_value[black_knight][white_king_bishop] = (static_cast<uint32_t>(0xbf) << 24) + (0x01 << 20);
+  capture_value[black_queen_bishop][white_king_bishop] = (static_cast<uint32_t>(0xbe) << 24) + (0x01 << 20);
+  capture_value[black_king_bishop][white_king_bishop] = (static_cast<uint32_t>(0xbe) << 24) + (0x01 << 20);
+  capture_value[black_rook][white_king_bishop] = (static_cast<uint32_t>(0xbd) << 24) + (0x00 << 20);
+  capture_value[black_queen][white_king_bishop] = (static_cast<uint32_t>(0xbc) << 24) + (0x00 << 20);
 
-  capture_value[black_pawn][white_queen_bishop] = (0xc0 << 24) + (0x02 << 20);
-  capture_value[black_knight][white_queen_bishop] = (0xbf << 24) + (0x01 << 20);
-  capture_value[black_queen_bishop][white_queen_bishop] = (0xbe << 24) + (0x01 << 20);
-  capture_value[black_king_bishop][white_queen_bishop] = (0xbe << 24) + (0x01 << 20);
-  capture_value[black_rook][white_queen_bishop] = (0xbd << 24) + (0x00 << 20);
-  capture_value[black_queen][white_queen_bishop] = (0xbc << 24) + (0x00 << 20);
+  capture_value[black_pawn][white_queen_bishop] = (static_cast<uint32_t>(0xc0) << 24) + (0x02 << 20);
+  capture_value[black_knight][white_queen_bishop] = (static_cast<uint32_t>(0xbf) << 24) + (0x01 << 20);
+  capture_value[black_queen_bishop][white_queen_bishop] = (static_cast<uint32_t>(0xbe) << 24) + (0x01 << 20);
+  capture_value[black_king_bishop][white_queen_bishop] = (static_cast<uint32_t>(0xbe) << 24) + (0x01 << 20);
+  capture_value[black_rook][white_queen_bishop] = (static_cast<uint32_t>(0xbd) << 24) + (0x00 << 20);
+  capture_value[black_queen][white_queen_bishop] = (static_cast<uint32_t>(0xbc) << 24) + (0x00 << 20);
 
-  capture_value[black_pawn][white_knight] = (0xb8 << 24) + (0x02 << 20);
-  capture_value[black_knight][white_knight] = (0xb7 << 24) + (0x01 << 20);
-  capture_value[black_queen_bishop][white_knight] = (0xb6 << 24) + (0x01 << 20);
-  capture_value[black_king_bishop][white_knight] = (0xb6 << 24) + (0x01 << 20);
-  capture_value[black_rook][white_knight] = (0xb5 << 24) + (0x00 << 20);
-  capture_value[black_queen][white_knight] = (0xb4 << 24) + (0x00 << 20);
+  capture_value[black_pawn][white_knight] = (static_cast<uint32_t>(0xb8) << 24) + (0x02 << 20);
+  capture_value[black_knight][white_knight] = (static_cast<uint32_t>(0xb7) << 24) + (0x01 << 20);
+  capture_value[black_queen_bishop][white_knight] = (static_cast<uint32_t>(0xb6) << 24) + (0x01 << 20);
+  capture_value[black_king_bishop][white_knight] = (static_cast<uint32_t>(0xb6) << 24) + (0x01 << 20);
+  capture_value[black_rook][white_knight] = (static_cast<uint32_t>(0xb5) << 24) + (0x00 << 20);
+  capture_value[black_queen][white_knight] = (static_cast<uint32_t>(0xb4) << 24) + (0x00 << 20);
 
-  capture_value[black_pawn][white_pawn] = (0xb0 << 24) + (0x01 << 20);
-  capture_value[black_knight][white_pawn] = (0xaf << 24) + (0x00 << 20);
-  capture_value[black_queen_bishop][white_pawn] = (0xae << 24) + (0x00 << 20);
-  capture_value[black_king_bishop][white_pawn] = (0xae << 24) + (0x00 << 20);
-  capture_value[black_rook][white_pawn] = (0xad << 24) + (0x00 << 20);
-  capture_value[black_queen][white_pawn] = (0xac << 24) + (0x00 << 20);
+  capture_value[black_pawn][white_pawn] = (static_cast<uint32_t>(0xb0) << 24) + (0x01 << 20);
+  capture_value[black_knight][white_pawn] = (static_cast<uint32_t>(0xaf) << 24) + (0x00 << 20);
+  capture_value[black_queen_bishop][white_pawn] = (static_cast<uint32_t>(0xae) << 24) + (0x00 << 20);
+  capture_value[black_king_bishop][white_pawn] = (static_cast<uint32_t>(0xae) << 24) + (0x00 << 20);
+  capture_value[black_rook][white_pawn] = (static_cast<uint32_t>(0xad) << 24) + (0x00 << 20);
+  capture_value[black_queen][white_pawn] = (static_cast<uint32_t>(0xac) << 24) + (0x00 << 20);
 
-  capture_value[black_king][white_queen] = (0xcb << 24) + (0x00 << 20);
-  capture_value[black_king][white_rook] = (0xc3 << 24) + (0x00 << 20);
-  capture_value[black_king][white_king_bishop] = (0xbb << 24) + (0x00 << 20);
-  capture_value[black_king][white_queen_bishop] = (0xbb << 24) + (0x00 << 20);
-  capture_value[black_king][white_knight] = (0xb3 << 24) + (0x00 << 20);
-  capture_value[black_king][white_pawn] = (0xab << 24) + (0x00 << 20);
+  capture_value[black_king][white_queen] = (static_cast<uint32_t>(0xcb) << 24) + (0x00 << 20);
+  capture_value[black_king][white_rook] = (static_cast<uint32_t>(0xc3) << 24) + (0x00 << 20);
+  capture_value[black_king][white_king_bishop] = (static_cast<uint32_t>(0xbb) << 24) + (0x00 << 20);
+  capture_value[black_king][white_queen_bishop] = (static_cast<uint32_t>(0xbb) << 24) + (0x00 << 20);
+  capture_value[black_king][white_knight] = (static_cast<uint32_t>(0xb3) << 24) + (0x00 << 20);
+  capture_value[black_king][white_pawn] = (static_cast<uint32_t>(0xab) << 24) + (0x00 << 20);
 
   capture_value[black_king][0] = (0x07 << 24) + (0x00 << 15);
   capture_value[black_pawn][0] = (0x06 << 24) + (0x01 << 15);
@@ -3302,9 +3320,9 @@ void eval_mobility() {
       position->black_king_check |= square_set[b];
     else if (board.piece[black_king] & diagonal[b]) {
       T = (bitboard_line_obscured[1][board.black_king][board.occupied_45_right
-          >> line_turn[1][board.black_king] & 077]
+        >> line_turn[1][board.black_king] & 077]
         | bitboard_line_obscured[0][board.black_king][board.occupied_45_left
-          >> line_turn[0][board.black_king] & 077]) & A;
+        >> line_turn[0][board.black_king] & 077]) & A;
       position->white_xray |= T;
 
       if (T)
@@ -3322,9 +3340,9 @@ void eval_mobility() {
       position->black_king_check |= square_set[b];
     else if (board.piece[black_king] & orthogonal[b]) {
       T = (bitboard_line_obscured[2][board.black_king][board.occupied_total
-          >> line_turn[2][board.black_king] & 077]
+        >> line_turn[2][board.black_king] & 077]
         | bitboard_line_obscured[3][board.black_king][board.occupied_90_left
-          >> line_turn[3][board.black_king] & 077]) & A;
+        >> line_turn[3][board.black_king] & 077]) & A;
       position->white_xray |= T;
 
       if (T)
@@ -3347,9 +3365,9 @@ void eval_mobility() {
       position->black_king_check |= square_set[b];
     else if (board.piece[black_king] & diagonal[b]) {
       T = (bitboard_line_obscured[1][board.black_king][board.occupied_45_right
-          >> line_turn[1][board.black_king] & 077]
+        >> line_turn[1][board.black_king] & 077]
         | bitboard_line_obscured[0][board.black_king][board.occupied_45_left
-          >> line_turn[0][board.black_king] & 077]) & diagonal_attack;
+        >> line_turn[0][board.black_king] & 077]) & diagonal_attack;
       position->white_xray |= T;
 
       if (T)
@@ -3357,9 +3375,9 @@ void eval_mobility() {
     }
     else if (board.piece[black_king] & orthogonal[b]) {
       T = (bitboard_line_obscured[2][board.black_king][board.occupied_total
-          >> line_turn[2][board.black_king] & 077]
+        >> line_turn[2][board.black_king] & 077]
         | bitboard_line_obscured[3][board.black_king][board.occupied_90_left
-          >> line_turn[3][board.black_king] & 077]) & orthogonal_attack;
+        >> line_turn[3][board.black_king] & 077]) & orthogonal_attack;
       position->white_xray |= T;
 
       if (T)
@@ -3386,9 +3404,9 @@ void eval_mobility() {
       position->white_king_check |= square_set[b];
     else if (board.piece[white_king] & diagonal[b]) {
       T = (bitboard_line_obscured[1][board.white_king][board.occupied_45_right
-          >> line_turn[1][board.white_king] & 077]
+        >> line_turn[1][board.white_king] & 077]
         | bitboard_line_obscured[0][board.white_king][board.occupied_45_left
-          >> line_turn[0][board.white_king] & 077]) & A;
+        >> line_turn[0][board.white_king] & 077]) & A;
       position->black_xray |= T;
 
       if (T)
@@ -3406,9 +3424,9 @@ void eval_mobility() {
       position->white_king_check |= square_set[b];
     else if (board.piece[white_king] & orthogonal[b]) {
       T = (bitboard_line_obscured[2][board.white_king][board.occupied_total
-          >> line_turn[2][board.white_king] & 077]
+        >> line_turn[2][board.white_king] & 077]
         | bitboard_line_obscured[3][board.white_king][board.occupied_90_left
-          >> line_turn[3][board.white_king] & 077]) & A;
+        >> line_turn[3][board.white_king] & 077]) & A;
       position->black_xray |= T;
 
       if (T)
@@ -3431,9 +3449,9 @@ void eval_mobility() {
       position->white_king_check |= square_set[b];
     else if (board.piece[white_king] & diagonal[b]) {
       T = (bitboard_line_obscured[1][board.white_king][board.occupied_45_right
-          >> line_turn[1][board.white_king] & 077]
+        >> line_turn[1][board.white_king] & 077]
         | bitboard_line_obscured[0][board.white_king][board.occupied_45_left
-          >> line_turn[0][board.white_king] & 077]) & diagonal_attack;
+        >> line_turn[0][board.white_king] & 077]) & diagonal_attack;
       position->black_xray |= T;
 
       if (T)
@@ -3441,9 +3459,9 @@ void eval_mobility() {
     }
     else if (board.piece[white_king] & orthogonal[b]) {
       T = (bitboard_line_obscured[2][board.white_king][board.occupied_total
-          >> line_turn[2][board.white_king] & 077]
+        >> line_turn[2][board.white_king] & 077]
         | bitboard_line_obscured[3][board.white_king][board.occupied_90_left
-          >> line_turn[3][board.white_king] & 077]) & orthogonal_attack;
+        >> line_turn[3][board.white_king] & 077]) & orthogonal_attack;
       position->black_xray |= T;
 
       if (T)
@@ -3538,8 +3556,7 @@ void endgame_pawn_white(const int material_value, const uint8_t token, type_pawn
         || (board.piece[black_king] & quadrant_black_wtm[square]) == 0)
         continue;
 
-      if (white_leader <= rank)
-        white_leader = rank;
+      white_leader = std::max<int64_t>(white_leader, rank);
     }
 
     else if (white_leader <= rank)
@@ -3558,8 +3575,7 @@ void endgame_pawn_white(const int material_value, const uint8_t token, type_pawn
         || (board.piece[white_king] & quadrant_white_wtm[square]) == 0)
         continue;
 
-      if (black_leader <= rank)
-        black_leader = rank;
+      black_leader = std::max<int64_t>(black_leader, rank);
     }
 
     else if (black_leader <= rank)
@@ -3608,12 +3624,12 @@ void endgame_pawn_white(const int material_value, const uint8_t token, type_pawn
   if (position->score > 0) {
     if ((board.piece[white_pawn] & ~0x8080808080808080) == 0
       && (board.piece[black_king]
-        | attack_king[board.black_king]) & square_set[h8])
+      | attack_king[board.black_king]) & square_set[h8])
       position->score = 0;
 
     if ((board.piece[white_pawn] & ~0x0101010101010101) == 0
       && (board.piece[black_king]
-        | attack_king[board.black_king]) & square_set[a8])
+      | attack_king[board.black_king]) & square_set[a8])
       position->score = 0;
 
     if ((position->flag & 28) == 28) {
@@ -3627,12 +3643,12 @@ void endgame_pawn_white(const int material_value, const uint8_t token, type_pawn
   if (position->score < 0) {
     if ((board.piece[black_pawn] & ~0x8080808080808080) == 0
       && (board.piece[white_king]
-        | attack_king[board.white_king]) & square_set[h1])
+      | attack_king[board.white_king]) & square_set[h1])
       position->score = 0;
 
     if ((board.piece[black_pawn] & ~0x0101010101010101) == 0
       && (board.piece[white_king]
-        | attack_king[board.white_king]) & square_set[a1])
+      | attack_king[board.white_king]) & square_set[a1])
       position->score = 0;
 
     if ((position->flag & 28) == 28) {
@@ -3665,8 +3681,7 @@ void endgame_pawn_black(const int material_value, const uint8_t token, type_pawn
         || (board.piece[black_king] & quadrant_black_btm[square]) == 0)
         continue;
 
-      if (white_leader <= rank)
-        white_leader = rank;
+      white_leader = std::max<int64_t>(white_leader, rank);
     }
 
     else if (white_leader <= rank)
@@ -3685,8 +3700,7 @@ void endgame_pawn_black(const int material_value, const uint8_t token, type_pawn
         || (board.piece[white_king] & quadrant_white_btm[square]) == 0)
         continue;
 
-      if (black_leader <= rank)
-        black_leader = rank;
+      black_leader = std::max<int64_t>(black_leader, rank);
     }
 
     else if (black_leader <= rank)
@@ -3733,12 +3747,12 @@ void endgame_pawn_black(const int material_value, const uint8_t token, type_pawn
   if (position->score < 0) {
     if ((board.piece[white_pawn] & ~0x8080808080808080) == 0
       && (board.piece[black_king]
-        | attack_king[board.black_king]) & square_set[h8])
+      | attack_king[board.black_king]) & square_set[h8])
       position->score = 0;
 
     if ((board.piece[white_pawn] & ~0x0101010101010101) == 0
       && (board.piece[black_king]
-        | attack_king[board.black_king]) & square_set[a8])
+      | attack_king[board.black_king]) & square_set[a8])
       position->score = 0;
 
     if ((position->flag & 28) == 28) {
@@ -3746,19 +3760,19 @@ void endgame_pawn_black(const int material_value, const uint8_t token, type_pawn
         position->score = 0;
       else
         position->score =
-          -static_cast<int16_t>(position->pst_value & 0xffff) - 75 * rank - 250;
+        -static_cast<int16_t>(position->pst_value & 0xffff) - 75 * rank - 250;
     }
   }
 
   if (position->score > 0) {
     if ((board.piece[black_pawn] & ~0x8080808080808080) == 0
       && (board.piece[white_king]
-        | attack_king[board.white_king]) & square_set[h1])
+      | attack_king[board.white_king]) & square_set[h1])
       position->score = 0;
 
     if ((board.piece[black_pawn] & ~0x0101010101010101) == 0
       && (board.piece[white_king]
-        | attack_king[board.white_king]) & square_set[a1])
+      | attack_king[board.white_king]) & square_set[a1])
       position->score = 0;
 
     if ((position->flag & 28) == 28) {
@@ -3766,7 +3780,7 @@ void endgame_pawn_black(const int material_value, const uint8_t token, type_pawn
         position->score = 0;
       else
         position->score =
-          -static_cast<int16_t>(position->pst_value & 0xffff) + 75 * rank + 250;
+        -static_cast<int16_t>(position->pst_value & 0xffff) + 75 * rank + 250;
     }
   }
 }
@@ -3789,7 +3803,7 @@ void eval(int min, int max, int move) {
 
   pawn_value = pawn_hash_table + (position->pawn_hash_key & (1 << 16) - 1);
   PREFETCH(pawn_value)
-  index = position->material >> 8 & 0x7ffff;
+    index = position->material >> 8 & 0x7ffff;
   token = material_table[index].token;
   position->flag = material_table[index].flag;
 
@@ -3959,9 +3973,9 @@ void eval(int min, int max, int move) {
 
     if (board.piece[black_king] & diagonal[b]) {
       T = (bitboard_line_obscured[1][black_king_square][board.occupied_45_right
-          >> line_turn[1][black_king_square] & 077]
+        >> line_turn[1][black_king_square] & 077]
         | bitboard_line_obscured[0][black_king_square][board.occupied_45_left
-          >> line_turn[0][black_king_square] & 077]) & diagonal_attack;
+        >> line_turn[0][black_king_square] & 077]) & diagonal_attack;
 
       if (T) {
         score += white_queen_xray_diagonal[board.square[bsf(T)]];
@@ -3971,9 +3985,9 @@ void eval(int min, int max, int move) {
     }
     else if (board.piece[black_king] & orthogonal[b]) {
       T = (bitboard_line_obscured[2][black_king_square][board.occupied_total
-          >> line_turn[2][black_king_square] & 077]
+        >> line_turn[2][black_king_square] & 077]
         | bitboard_line_obscured[3][black_king_square][board.occupied_90_left
-          >> line_turn[3][black_king_square] & 077]) & orthogonal_attack;
+        >> line_turn[3][black_king_square] & 077]) & orthogonal_attack;
 
       if (T) {
         score += white_queen_xray_orthogonal[board.square[bsf(T)]];
@@ -4026,9 +4040,9 @@ void eval(int min, int max, int move) {
 
     if (board.piece[black_king] & orthogonal[b]) {
       T = (bitboard_line_obscured[2][black_king_square][board.occupied_total
-          >> line_turn[2][black_king_square] & 077]
+        >> line_turn[2][black_king_square] & 077]
         | bitboard_line_obscured[3][black_king_square][board.occupied_90_left
-          >> line_turn[3][black_king_square] & 077]) & A;
+        >> line_turn[3][black_king_square] & 077]) & A;
 
       if (T) {
         score += white_rook_xray[board.square[bsf(T)]];
@@ -4101,7 +4115,7 @@ void eval(int min, int max, int move) {
 
         if (A & (black_king_attack
           | (board.piece[occupied_black] & ~black_pawn_attack)) & rank_table[
-          (b >> 3)])
+            (b >> 3)])
           score += (3 << 16) + 4;
       }
     }
@@ -4118,7 +4132,7 @@ void eval(int min, int max, int move) {
 
         if (board.piece[black_king] & 0xff00000000000000
           && (board.piece[white_queen]
-            | board.piece[white_rook]) & 0x00ff000000000000 & A)
+          | board.piece[white_rook]) & 0x00ff000000000000 & A)
           score += (10 << 16) + 20;
       }
     }
@@ -4141,9 +4155,9 @@ void eval(int min, int max, int move) {
 
     if (board.piece[black_king] & diagonal[b]) {
       T = (bitboard_line_obscured[1][black_king_square][board.occupied_45_right
-          >> line_turn[1][black_king_square] & 077]
+        >> line_turn[1][black_king_square] & 077]
         | bitboard_line_obscured[0][black_king_square][board.occupied_45_left
-          >> line_turn[0][black_king_square] & 077]) & A;
+        >> line_turn[0][black_king_square] & 077]) & A;
 
       if (T) {
         score += white_bishop_xray[board.square[bsf(T)]];
@@ -4288,9 +4302,9 @@ void eval(int min, int max, int move) {
 
     if (board.piece[white_king] & diagonal[b]) {
       T = (bitboard_line_obscured[1][white_king_square][board.occupied_45_right
-          >> line_turn[1][white_king_square] & 077]
+        >> line_turn[1][white_king_square] & 077]
         | bitboard_line_obscured[0][white_king_square][board.occupied_45_left
-          >> line_turn[0][white_king_square] & 077]) & diagonal_attack;
+        >> line_turn[0][white_king_square] & 077]) & diagonal_attack;
 
       if (T) {
         score -= black_queen_xray_diagonal[board.square[bsf(T)]];
@@ -4300,9 +4314,9 @@ void eval(int min, int max, int move) {
     }
     else if (board.piece[white_king] & orthogonal[b]) {
       T = (bitboard_line_obscured[2][white_king_square][board.occupied_total
-          >> line_turn[2][white_king_square] & 077]
+        >> line_turn[2][white_king_square] & 077]
         | bitboard_line_obscured[3][white_king_square][board.occupied_90_left
-          >> line_turn[3][white_king_square] & 077]) & orthogonal_attack;
+        >> line_turn[3][white_king_square] & 077]) & orthogonal_attack;
 
       if (T) {
         score -= black_queen_xray_orthogonal[board.square[bsf(T)]];
@@ -4355,9 +4369,9 @@ void eval(int min, int max, int move) {
 
     if (board.piece[white_king] & orthogonal[b]) {
       T = A & (bitboard_line_obscured[2][white_king_square][board.occupied_total
-          >> line_turn[2][white_king_square] & 077]
+        >> line_turn[2][white_king_square] & 077]
         | bitboard_line_obscured[3][white_king_square][board.occupied_90_left
-          >> line_turn[3][white_king_square] & 077]);
+        >> line_turn[3][white_king_square] & 077]);
 
       if (T) {
         score -= black_rook_xray[board.square[bsf(T)]];
@@ -4430,7 +4444,7 @@ void eval(int min, int max, int move) {
 
         if (A & (white_king_attack
           | (board.piece[occupied_white] & ~white_pawn_attack)) & rank_table[
-          (b >> 3)])
+            (b >> 3)])
           score -= (3 << 16) + 4;
       }
     }
@@ -4447,7 +4461,7 @@ void eval(int min, int max, int move) {
 
         if (board.piece[white_king] & 0x00000000000000ff
           && (board.piece[black_queen]
-            | board.piece[black_rook]) & 0x000000000000ff00 & A)
+          | board.piece[black_rook]) & 0x000000000000ff00 & A)
           score -= (10 << 16) + 20;
       }
     }
@@ -4470,9 +4484,9 @@ void eval(int min, int max, int move) {
 
     if (board.piece[white_king] & diagonal[b]) {
       T = A & (bitboard_line_obscured[1][white_king_square][board.occupied_45_right
-          >> line_turn[1][white_king_square] & 077]
+        >> line_turn[1][white_king_square] & 077]
         | bitboard_line_obscured[0][white_king_square][board.occupied_45_left
-          >> line_turn[0][white_king_square] & 077]);
+        >> line_turn[0][white_king_square] & 077]);
 
       if (T) {
         score -= black_bishop_xray[board.square[bsf(T)]];
@@ -4780,18 +4794,18 @@ void eval(int min, int max, int move) {
       if (board.piece[white_knight]) {
         if (board.piece[white_pawn] == square_set[a7]
           && (board.piece[black_king]
-            | attack_king[board.black_king]) & square_set[a8])
+          | attack_king[board.black_king]) & square_set[a8])
           score = 0;
 
         if (board.piece[white_pawn] == square_set[h7]
           && (board.piece[black_king]
-            | attack_king[board.black_king]) & square_set[h8])
+          | attack_king[board.black_king]) & square_set[h8])
           score = 0;
       }
       else if (board.piece[white_king_bishop]
         && !(board.piece[white_pawn] & 0x7f7f7f7f7f7f7f7f)
         && (board.piece[black_king]
-          | attack_king[board.black_king]) & square_set[h8]) {
+        | attack_king[board.black_king]) & square_set[h8]) {
         if (board.piece[white_pawn] & square_set[h5]
           && board.piece[black_pawn] == (square_set[g7] | square_set[h6])) {
         }
@@ -4801,7 +4815,7 @@ void eval(int min, int max, int move) {
       else if (board.piece[white_queen_bishop]
         && !(board.piece[white_pawn] & 0xfefefefefefefefe)
         && (board.piece[black_king]
-          | attack_king[board.black_king]) & square_set[a8]) {
+        | attack_king[board.black_king]) & square_set[a8]) {
         if (board.piece[white_pawn] & square_set[a5]
           && board.piece[black_pawn] == (square_set[b7] | square_set[a6])) {
         }
@@ -4818,18 +4832,18 @@ void eval(int min, int max, int move) {
       if (board.piece[black_knight]) {
         if (board.piece[black_pawn] == square_set[a2]
           && (board.piece[white_king]
-            | attack_king[board.white_king]) & square_set[a1])
+          | attack_king[board.white_king]) & square_set[a1])
           score = 0;
 
         if (board.piece[black_pawn] == square_set[h2]
           && (board.piece[white_king]
-            | attack_king[board.white_king]) & square_set[h1])
+          | attack_king[board.white_king]) & square_set[h1])
           score = 0;
       }
       else if (board.piece[black_king_bishop]
         && !(board.piece[black_pawn] & 0x7f7f7f7f7f7f7f7f)
         && (board.piece[white_king]
-          | attack_king[board.white_king]) & square_set[h1]) {
+        | attack_king[board.white_king]) & square_set[h1]) {
         if (board.piece[black_pawn] & square_set[h4]
           && board.piece[white_pawn] == (square_set[g2] | square_set[h3])) {
         }
@@ -4839,7 +4853,7 @@ void eval(int min, int max, int move) {
       else if (board.piece[black_queen_bishop]
         && !(board.piece[black_pawn] & 0xfefefefefefefefe)
         && (board.piece[white_king]
-          | attack_king[board.white_king]) & square_set[a1]) {
+        | attack_king[board.white_king]) & square_set[a1]) {
         if (board.piece[black_pawn] & square_set[a4]
           && board.piece[white_pawn] == (square_set[b2] | square_set[a3])) {
         }
@@ -4865,14 +4879,14 @@ void eval(int min, int max, int move) {
 void init_pawns() {
   int file, rank;
   constexpr int ch[8] =
-    {
-      files_b, files_b, files_c, files_d, files_e, files_f, files_g, files_g
-    };
+  {
+    files_b, files_b, files_c, files_d, files_e, files_f, files_g, files_g
+  };
 
   constexpr int change[8] =
-    {
-      1, 1, 1, 1, -1, -1, -1, -1
-    };
+  {
+    1, 1, 1, 1, -1, -1, -1, -1
+  };
 
   for (file = files_a; file <= files_h; file++) {
     shelter_storm[file].edge = file_table[ch[file] - change[file]];
@@ -5114,13 +5128,11 @@ void eval_pawns(type_pawn_hash* result) {
 
     white_king_distance = DISTANCE_KING_PAWN_WHITE(b, white_king_square);
 
-    if (white_king_distance < white_king_distance_best)
-      white_king_distance_best = white_king_distance;
+    white_king_distance_best = (std::min)(white_king_distance, white_king_distance_best);
 
     black_king_distance = DISTANCE_KING_PAWN_WHITE(b, black_king_square);
 
-    if (black_king_distance < black_king_distance_best)
-      black_king_distance_best = black_king_distance;
+    black_king_distance_best = (std::min)(black_king_distance, black_king_distance_best);
 
     if (square_set[b] & 0x55aa55aa55aa55aa) {
       result->white_pawn_white += blocked_pawn[b];
@@ -5137,7 +5149,7 @@ void eval_pawns(type_pawn_hash* result) {
 
     if (board.piece[white_pawn] & west_two[b]
       && (board.piece[white_pawn] & in_front_white[rank - 1]
-        & file_table[file - 1]) == 0)
+      & file_table[file - 1]) == 0)
       score -= (1 << 16) + 2;
 
     if ((board.piece[white_pawn]
@@ -5227,7 +5239,7 @@ void eval_pawns(type_pawn_hash* result) {
 
       if (V)
         passed_pawn_score +=
-          connected_passed_pawn_value[rank] + connected_passed_pawn_value[(bsf(V) >> 3)];
+        connected_passed_pawn_value[rank] + connected_passed_pawn_value[(bsf(V) >> 3)];
     }
     score += passed_pawn_score;
     result->white_passed_pawn_file |= static_cast<uint8_t>(1 << file);
@@ -5260,13 +5272,11 @@ void eval_pawns(type_pawn_hash* result) {
 
     black_king_distance = DISTANCE_KING_PAWN_BLACK(b, black_king_square);
 
-    if (black_king_distance < black_king_distance_best)
-      black_king_distance_best = black_king_distance;
+    black_king_distance_best = (std::min)(black_king_distance, black_king_distance_best);
 
     white_king_distance = DISTANCE_KING_PAWN_BLACK(b, white_king_square);
 
-    if (white_king_distance < white_king_distance_best)
-      white_king_distance_best = white_king_distance;
+    white_king_distance_best = (std::min)(white_king_distance, white_king_distance_best);
 
     if (square_set[b] & 0x55aa55aa55aa55aa) {
       result->black_pawn_white += blocked_pawn[b];
@@ -5283,7 +5293,7 @@ void eval_pawns(type_pawn_hash* result) {
 
     if (board.piece[black_pawn] & west_two[b]
       && (board.piece[black_pawn] & in_front_black[rank
-        + 1] & file_table[file - 1]) == 0)
+      + 1] & file_table[file - 1]) == 0)
       score += (1 << 16) + 2;
 
     if ((board.piece[white_pawn]
@@ -5373,7 +5383,7 @@ void eval_pawns(type_pawn_hash* result) {
 
       if (V)
         passed_pawn_score +=
-          connected_passed_pawn_value[7 - rank] + connected_passed_pawn_value[7 - (bsf(V) >> 3)];
+        connected_passed_pawn_value[7 - rank] + connected_passed_pawn_value[7 - (bsf(V) >> 3)];
     }
     score -= passed_pawn_score;
     result->black_passed_pawn_file |= static_cast<uint8_t>(1 << file);
@@ -5608,8 +5618,7 @@ uint8_t black_see(const uint32_t move) {
       }
     }
     value_capture -= value_piece;
-  }
-  while (value_capture < -60);
+  } while (value_capture < -60);
   return 1;
 }
 
@@ -5782,8 +5791,7 @@ uint8_t white_see(const uint32_t move) {
       }
     }
     value_capture -= value_piece;
-  }
-  while (value_capture < -60);
+  } while (value_capture < -60);
   return 1;
 }
 
@@ -5873,7 +5881,7 @@ uint8_t black_ok(const uint32_t move) {
     if ((bitboard_line_obscured[2][from][board.occupied_total >> line_turn[2][from] & 077]
       | bitboard_line_obscured[3][from][board.occupied_90_left >> line_turn[3][from] & 077]
       | (bitboard_line_obscured[1][from][board.occupied_45_right >> line_turn[1][from] & 077]
-        | bitboard_line_obscured[0][from][board.occupied_45_left >> line_turn[0][from] & 077])) & mask)
+      | bitboard_line_obscured[0][from][board.occupied_45_left >> line_turn[0][from] & 077])) & mask)
       return 1;
     return 0;
   }
@@ -5972,7 +5980,7 @@ uint8_t white_ok(const uint32_t move) {
     if ((bitboard_line_obscured[2][from][board.occupied_total >> line_turn[2][from] & 077]
       | bitboard_line_obscured[3][from][board.occupied_90_left >> line_turn[3][from] & 077]
       | (bitboard_line_obscured[1][from][board.occupied_45_right >> line_turn[1][from] & 077]
-        | bitboard_line_obscured[0][from][board.occupied_45_left >> line_turn[0][from] & 077])) & mask)
+      | bitboard_line_obscured[0][from][board.occupied_45_left >> line_turn[0][from] & 077])) & mask)
       return 1;
     return 0;
   }
@@ -5986,7 +5994,7 @@ uint8_t white_ok(const uint32_t move) {
 }
 
 void sort(const type_move_list* a1, type_move_list* a2, const uint32_t s1, const uint32_t s2, const uint32_t s3) {
-  type_move_list *p, *q;
+  type_move_list* p, * q;
 
   if (a1 == a2)
     return;
@@ -6085,13 +6093,15 @@ type_move_list* black_evasion(type_move_list* list, uint64_t mask2) {
     c = board.square[to];
 
     if (to <= h1) {
-      (list++)->move = (070000 | (((to) + 7) << 6) | to)
+      (list++)->move = (070000 | (((to)+7) << 6) | to)
         | (0x20 << 24) + capture_value[black_pawn][c];
-      (list++)->move = (040000 | (((to) + 7) << 6) | to) | (0);
-      (list++)->move = (060000 | (((to) + 7) << 6) | to) | (0);
-      (list++)->move = (050000 | (((to) + 7) << 6) | to) | (0);
+      (list++)->move = (040000 | (((to)+7) << 6) | to) | (0);
+      (list++)->move = (060000 | (((to)+7) << 6) | to) | (0);
+      (list++)->move = (050000 | (((to)+7) << 6) | to) | (0);
     }
-    else { (list++)->move = ((((to) + 7) << 6) | to) | (capture_value[black_pawn][c]); }
+    else {
+      (list++)->move = ((((to)+7) << 6) | to) | (capture_value[black_pawn][c]);
+    }
   }
 
   if (((board.piece[black_pawn] & ~0x0101010101010101)
@@ -6100,26 +6110,28 @@ type_move_list* black_evasion(type_move_list* list, uint64_t mask2) {
     c = board.square[to];
 
     if (to <= h1) {
-      (list++)->move = (070000 | (((to) + 9) << 6) | to)
+      (list++)->move = (070000 | (((to)+9) << 6) | to)
         | (0x20 << 24) + capture_value[black_pawn][c];
-      (list++)->move = (040000 | (((to) + 9) << 6) | to) | (0);
-      (list++)->move = (060000 | (((to) + 9) << 6) | to) | (0);
-      (list++)->move = (050000 | (((to) + 9) << 6) | to) | (0);
+      (list++)->move = (040000 | (((to)+9) << 6) | to) | (0);
+      (list++)->move = (060000 | (((to)+9) << 6) | to) | (0);
+      (list++)->move = (050000 | (((to)+9) << 6) | to) | (0);
     }
-    else { (list++)->move = ((((to) + 9) << 6) | to) | (capture_value[black_pawn][c]); }
+    else {
+      (list++)->move = ((((to)+9) << 6) | to) | (capture_value[black_pawn][c]);
+    }
   }
   to = position->en_passant;
 
   if (to) {
     if ((board.piece[black_pawn] & ~0x8080808080808080) >> 7 & square_set[to]
       && square_set[(to + 8)] & mask2)
-      (list++)->move = (030000 | (((to) + 7) << 6) | to)
-        | capture_value[black_pawn][white_pawn];
+      (list++)->move = (030000 | (((to)+7) << 6) | to)
+      | capture_value[black_pawn][white_pawn];
 
     if ((board.piece[black_pawn] & ~0x0101010101010101) >> 9 & square_set[to]
       && square_set[(to + 8)] & mask2)
-      (list++)->move = (030000 | (((to) + 9) << 6) | to)
-        | capture_value[black_pawn][white_pawn];
+      (list++)->move = (030000 | (((to)+9) << 6) | to)
+      | capture_value[black_pawn][white_pawn];
   }
   uint64_t T = board.piece[black_pawn] & (((mask2 & board.piece[occupied_white])
     ^ mask2) << 8);
@@ -6135,7 +6147,9 @@ type_move_list* black_evasion(type_move_list* list, uint64_t mask2) {
       list++->move = 060000 | from << 6 | from - 8 | 0;
       list++->move = 050000 | from << 6 | from - 8 | 0;
     }
-    else { list++->move = from << 6 | from - 8 | capture_value[black_pawn][0]; }
+    else {
+      list++->move = from << 6 | from - 8 | capture_value[black_pawn][0];
+    }
   }
   T = board.piece[black_pawn] & (((mask2 & board.piece[occupied_white])
     ^ mask2) << 16 & 0x00ff000000000000 & ~board.occupied_total << 8);
@@ -6162,7 +6176,7 @@ type_move_list* black_evasion(type_move_list* list, uint64_t mask2) {
     square = bsf(U);
     T = (bitboard_line_obscured[1][square][board.occupied_45_right >> line_turn[1][square] & 077]
       | bitboard_line_obscured[0][square][board.occupied_45_left
-        >> line_turn[0][square] & 077]) & mask2;
+      >> line_turn[0][square] & 077]) & mask2;
 
     while (T) {
       to = bsf(T);
@@ -6176,7 +6190,7 @@ type_move_list* black_evasion(type_move_list* list, uint64_t mask2) {
     square = bsf(U);
     T = (bitboard_line_obscured[2][square][board.occupied_total >> line_turn[2][square] & 077]
       | bitboard_line_obscured[3][square][board.occupied_90_left
-        >> line_turn[3][square] & 077]) & mask2;
+      >> line_turn[3][square] & 077]) & mask2;
 
     while (T) {
       to = bsf(T);
@@ -6191,8 +6205,8 @@ type_move_list* black_evasion(type_move_list* list, uint64_t mask2) {
     T = (bitboard_line_obscured[2][square][board.occupied_total >> line_turn[2][square] & 077]
       | bitboard_line_obscured[3][square][board.occupied_90_left >> line_turn[3][square] & 077]
       | (bitboard_line_obscured[1][square][board.occupied_45_right >> line_turn[1][square] & 077]
-        | bitboard_line_obscured[0][square][board.occupied_45_left
-          >> line_turn[0][square] & 077])) & mask2;
+      | bitboard_line_obscured[0][square][board.occupied_45_left
+      >> line_turn[0][square] & 077])) & mask2;
 
     while (T) {
       to = bsf(T);
@@ -6213,19 +6227,19 @@ type_move_list* black_gain(type_move_list* list, const int score) {
   const type_move_list* sm = list;
 
   for (U = (board.piece[black_pawn] & 0x00ffffffffffff0000) >> 8 & empty_squares;
-       U; U &= U - 1) {
+    U; U &= U - 1) {
     to = bsf(U);
 
     if ((to & 070) == 050 && board.square[(to - 8)] == 0) {
-      value = static_cast<int>(max_increase[black_pawn][((((to) + 8) << 6) | ((to) - 8)) & 07777]);
+      value = static_cast<int>(max_increase[black_pawn][((((to)+8) << 6) | ((to)-8)) & 07777]);
 
       if (value >= score)
-        (list++)->move = ((((to) + 8) << 6) | ((to) - 8)) | (value << 16);
+        (list++)->move = ((((to)+8) << 6) | ((to)-8)) | (value << 16);
     }
-    value = static_cast<int>(max_increase[black_pawn][((((to) + 8) << 6) | to) & 07777]);
+    value = static_cast<int>(max_increase[black_pawn][((((to)+8) << 6) | to) & 07777]);
 
     if (value >= score)
-      (list++)->move = ((((to) + 8) << 6) | to) | (value << 16);
+      (list++)->move = ((((to)+8) << 6) | to) | (value << 16);
   }
 
   for (U = board.piece[black_knight]; U; U &= U - 1) {
@@ -6246,7 +6260,7 @@ type_move_list* black_gain(type_move_list* list, const int score) {
     square = bsf(U);
     T = (bitboard_line_obscured[1][square][board.occupied_45_right >> line_turn[1][square] & 077]
       | bitboard_line_obscured[0][square][board.occupied_45_left
-        >> line_turn[0][square] & 077]) & empty_squares;
+      >> line_turn[0][square] & 077]) & empty_squares;
 
     while (T) {
       to = bsf(T);
@@ -6262,7 +6276,7 @@ type_move_list* black_gain(type_move_list* list, const int score) {
     square = bsf(U);
     T = (bitboard_line_obscured[1][square][board.occupied_45_right >> line_turn[1][square] & 077]
       | bitboard_line_obscured[0][square][board.occupied_45_left
-        >> line_turn[0][square] & 077]) & empty_squares;
+      >> line_turn[0][square] & 077]) & empty_squares;
 
     while (T) {
       to = bsf(T);
@@ -6278,7 +6292,7 @@ type_move_list* black_gain(type_move_list* list, const int score) {
     square = bsf(U);
     T = (bitboard_line_obscured[2][square][board.occupied_total >> line_turn[2][square] & 077]
       | bitboard_line_obscured[3][square][board.occupied_90_left
-        >> line_turn[3][square] & 077]) & empty_squares;
+      >> line_turn[3][square] & 077]) & empty_squares;
 
     while (T) {
       to = bsf(T);
@@ -6295,8 +6309,8 @@ type_move_list* black_gain(type_move_list* list, const int score) {
     T = (bitboard_line_obscured[2][square][board.occupied_total >> line_turn[2][square] & 077]
       | bitboard_line_obscured[3][square][board.occupied_90_left >> line_turn[3][square] & 077]
       | (bitboard_line_obscured[1][square][board.occupied_45_right >> line_turn[1][square] & 077]
-        | bitboard_line_obscured[0][square][board.occupied_45_left
-          >> line_turn[0][square] & 077])) & empty_squares;
+      | bitboard_line_obscured[0][square][board.occupied_45_left
+      >> line_turn[0][square] & 077])) & empty_squares;
 
     while (T) {
       to = bsf(T);
@@ -6342,25 +6356,25 @@ type_move_list* black_capture(type_move_list* list, const uint64_t mask) {
 
   if (to) {
     if ((board.piece[black_pawn] & ~0x0101010101010101) >> 9 & square_set[to]) {
-      (list++)->move = (030000 | (((to) + 9) << 6) | to)
+      (list++)->move = (030000 | (((to)+9) << 6) | to)
         | capture_value[black_pawn][white_pawn];
     }
 
     if ((board.piece[black_pawn] & ~0x8080808080808080) >> 7 & square_set[to]) {
-      (list++)->move = (030000 | (((to) + 7) << 6) | to)
+      (list++)->move = (030000 | (((to)+7) << 6) | to)
         | capture_value[black_pawn][white_pawn];
     }
   }
-	
-	uint64_t T = (board.piece[black_pawn] & ~0x0101010101010101) >> 9 & ~0x00000000000000ff & mask;
 
-	if ((mask & position->black_attack) == 0)
-		goto empty_target;
+  uint64_t T = (board.piece[black_pawn] & ~0x0101010101010101) >> 9 & ~0x00000000000000ff & mask;
+
+  if ((mask & position->black_attack) == 0)
+    goto empty_target;
 
   while (T) {
     to = bsf(T);
     c = board.square[to];
-    (list++)->move = ((((to) + 9) << 6) | to) | (capture_value[black_pawn][c]);
+    (list++)->move = ((((to)+9) << 6) | to) | (capture_value[black_pawn][c]);
     T &= T - 1;
   }
   T = (board.piece[black_pawn] & ~0x8080808080808080) >> 7 & ~0x00000000000000ff & mask;
@@ -6368,7 +6382,7 @@ type_move_list* black_capture(type_move_list* list, const uint64_t mask) {
   while (T) {
     to = bsf(T);
     c = board.square[to];
-    (list++)->move = ((((to) + 7) << 6) | to) | (capture_value[black_pawn][c]);
+    (list++)->move = ((((to)+7) << 6) | to) | (capture_value[black_pawn][c]);
     T &= T - 1;
   }
 
@@ -6385,7 +6399,7 @@ type_move_list* black_capture(type_move_list* list, const uint64_t mask) {
   }
 
   for (U = board.piece[black_queen_bishop] | board.piece[black_king_bishop];
-       U; U &= U - 1) {
+    U; U &= U - 1) {
     square = bsf(U);
     diagonal_attack = bitboard_line_obscured[1][square][board.occupied_45_right >> line_turn[1][square] & 077]
       | bitboard_line_obscured[0][square][board.occupied_45_left >> line_turn[0][square] & 077];
@@ -6447,7 +6461,9 @@ empty_target:
     if (board.square[to] == 0) {
       list++->move = 070000 | square << 6 | to | 0xd8 << 24;
 
-      if (attack_knight[to] & board.piece[white_king]) { list++->move = 040000 | square << 6 | to | 0xc2 << 24; }
+      if (attack_knight[to] & board.piece[white_king]) {
+        list++->move = 040000 | square << 6 | to | 0xc2 << 24;
+      }
     }
     to = square - 9;
 
@@ -6499,26 +6515,26 @@ type_move_list* black_ordinary(type_move_list* list) {
 
   if (board.piece[black_queen] | board.piece[black_rook])
     L = bitboard_line_obscured[2][king_square_rerun][board.occupied_total
-        >> line_turn[2][king_square_rerun] & 077]
-      | bitboard_line_obscured[3][king_square_rerun][board.occupied_90_left
-        >> line_turn[3][king_square_rerun] & 077];
+    >> line_turn[2][king_square_rerun] & 077]
+    | bitboard_line_obscured[3][king_square_rerun][board.occupied_90_left
+    >> line_turn[3][king_square_rerun] & 077];
 
   if (board.piece[black_queen]
     | (board.piece[black_queen_bishop] | board.piece[black_king_bishop]))
     next = bitboard_line_obscured[1][king_square_rerun][board.occupied_45_right
-        >> line_turn[1][king_square_rerun] & 077]
-      | bitboard_line_obscured[0][king_square_rerun][board.occupied_45_left
-        >> line_turn[0][king_square_rerun] & 077];
+    >> line_turn[1][king_square_rerun] & 077]
+    | bitboard_line_obscured[0][king_square_rerun][board.occupied_45_left
+    >> line_turn[0][king_square_rerun] & 077];
 
   for (U = (board.piece[black_pawn] & 0x00ffffffffffff0000) >> 8 & empty_squares;
-       U; U &= U - 1) {
+    U; U &= U - 1) {
     to = bsf(U);
 
     if ((to & 070) == 050 && board.square[(to - 8)] == 0) {
-      (list++)->move = ((((to) + 8) << 6) | ((to) - 8)) | ((square_set[((to) - 8)] & (K)) ? 0x8000 : 0)
+      (list++)->move = ((((to)+8) << 6) | ((to)-8)) | ((square_set[((to)-8)] & (K)) ? 0x8000 : 0)
         | history_table[black_pawn][(to - 8)] << 16;
     }
-    (list++)->move = ((((to) + 8) << 6) | to) | ((square_set[to] & (K)) ? 0x8000 : 0)
+    (list++)->move = ((((to)+8) << 6) | to) | ((square_set[to] & (K)) ? 0x8000 : 0)
       | history_table[black_pawn][to] << 16;
   }
 
@@ -6527,8 +6543,8 @@ type_move_list* black_ordinary(type_move_list* list) {
     T = (bitboard_line_obscured[2][square][board.occupied_total >> line_turn[2][square] & 077]
       | bitboard_line_obscured[3][square][board.occupied_90_left >> line_turn[3][square] & 077]
       | (bitboard_line_obscured[1][square][board.occupied_45_right >> line_turn[1][square] & 077]
-        | bitboard_line_obscured[0][square][board.occupied_45_left
-          >> line_turn[0][square] & 077])) & empty_squares;
+      | bitboard_line_obscured[0][square][board.occupied_45_left
+      >> line_turn[0][square] & 077])) & empty_squares;
 
     while (T) {
       to = bsf(T);
@@ -6542,7 +6558,7 @@ type_move_list* black_ordinary(type_move_list* list) {
     square = bsf(U);
     T = (bitboard_line_obscured[2][square][board.occupied_total >> line_turn[2][square] & 077]
       | bitboard_line_obscured[3][square][board.occupied_90_left
-        >> line_turn[3][square] & 077]) & empty_squares;
+      >> line_turn[3][square] & 077]) & empty_squares;
 
     while (T) {
       to = bsf(T);
@@ -6553,11 +6569,11 @@ type_move_list* black_ordinary(type_move_list* list) {
   }
 
   for (U = board.piece[black_queen_bishop] | board.piece[black_king_bishop];
-       U; U &= U - 1) {
+    U; U &= U - 1) {
     square = bsf(U);
     T = (bitboard_line_obscured[1][square][board.occupied_45_right >> line_turn[1][square] & 077]
       | bitboard_line_obscured[0][square][board.occupied_45_left
-        >> line_turn[0][square] & 077]) & empty_squares;
+      >> line_turn[0][square] & 077]) & empty_squares;
 
     while (T) {
       to = bsf(T);
@@ -6643,7 +6659,7 @@ type_move_list* black_check(type_move_list* list, uint64_t mask) {
   king_square = board.white_king;
 
   for (U = position->black_xray & board.piece[occupied_black]; U;
-       U &= U - 1) {
+    U &= U - 1) {
     from = bsf(U);
     piece = board.square[from];
 
@@ -6713,7 +6729,7 @@ type_move_list* black_check(type_move_list* list, uint64_t mask) {
 
   while (T) {
     to = bsf(T);
-    (list++)->move = (((to) + 9) << 6) | to;
+    (list++)->move = (((to)+9) << 6) | to;
     T &= T - 1;
   }
   T = (board.piece[black_pawn] & ~0x8080808080808080)
@@ -6722,7 +6738,7 @@ type_move_list* black_check(type_move_list* list, uint64_t mask) {
 
   while (T) {
     to = bsf(T);
-    (list++)->move = (((to) + 7) << 6) | to;
+    (list++)->move = (((to)+7) << 6) | to;
     T &= T - 1;
   }
 
@@ -6731,15 +6747,15 @@ type_move_list* black_check(type_move_list* list, uint64_t mask) {
     T = (bitboard_line_obscured[2][square][board.occupied_total >> line_turn[2][square] & 077]
       | bitboard_line_obscured[3][square][board.occupied_90_left >> line_turn[3][square] & 077]
       | (bitboard_line_obscured[1][square][board.occupied_45_right >> line_turn[1][square] & 077]
-        | bitboard_line_obscured[0][square][board.occupied_45_left
-          >> line_turn[0][square] & 077])) & (bitboard_line_obscured[2][king_square][board.
-        occupied_total >> line_turn[2][king_square] & 077]
+      | bitboard_line_obscured[0][square][board.occupied_45_left
+      >> line_turn[0][square] & 077])) & (bitboard_line_obscured[2][king_square][board.
+      occupied_total >> line_turn[2][king_square] & 077]
       | bitboard_line_obscured[3][king_square][board.occupied_90_left
-        >> line_turn[3][king_square] & 077]
+      >> line_turn[3][king_square] & 077]
       | (bitboard_line_obscured[1][king_square][board.occupied_45_right
-          >> line_turn[1][king_square] & 077]
-        | bitboard_line_obscured[0][king_square][board.occupied_45_left
-          >> line_turn[0][king_square] & 077])) & mask;
+      >> line_turn[1][king_square] & 077]
+      | bitboard_line_obscured[0][king_square][board.occupied_45_left
+      >> line_turn[0][king_square] & 077])) & mask;
 
     while (T) {
       to = bsf(T);
@@ -6759,10 +6775,10 @@ type_move_list* black_check(type_move_list* list, uint64_t mask) {
     square = bsf(U);
     T = (bitboard_line_obscured[2][square][board.occupied_total >> line_turn[2][square] & 077]
       | bitboard_line_obscured[3][square][board.occupied_90_left
-        >> line_turn[3][square] & 077]) & (bitboard_line_obscured[2][king_square][board.
-        occupied_total >> line_turn[2][king_square] & 077]
+      >> line_turn[3][square] & 077]) & (bitboard_line_obscured[2][king_square][board.
+      occupied_total >> line_turn[2][king_square] & 077]
       | bitboard_line_obscured[3][king_square][board.occupied_90_left
-        >> line_turn[3][king_square] & 077]) & mask;
+      >> line_turn[3][king_square] & 077]) & mask;
 
     while (T) {
       to = bsf(T);
@@ -6779,14 +6795,14 @@ type_move_list* black_check(type_move_list* list, uint64_t mask) {
   }
 
   for (U = board.piece[black_queen_bishop] | board.piece[black_king_bishop];
-       U; U &= U - 1) {
+    U; U &= U - 1) {
     square = bsf(U);
     T = (bitboard_line_obscured[1][square][board.occupied_45_right >> line_turn[1][square] & 077]
       | bitboard_line_obscured[0][square][board.occupied_45_left
-        >> line_turn[0][square] & 077]) & (bitboard_line_obscured[1][king_square][board.
-        occupied_45_right >> line_turn[1][king_square] & 077]
+      >> line_turn[0][square] & 077]) & (bitboard_line_obscured[1][king_square][board.
+      occupied_45_right >> line_turn[1][king_square] & 077]
       | bitboard_line_obscured[0][king_square][board.occupied_45_left
-        >> line_turn[0][king_square] & 077]) & mask;
+      >> line_turn[0][king_square] & 077]) & mask;
 
     while (T) {
       to = bsf(T);
@@ -6827,8 +6843,8 @@ type_move_list* black_check(type_move_list* list, uint64_t mask) {
 
       if ((position->black_attack & square_set[to]
         || bitboard_line_obscured[3][from][board.occupied_90_left
-          >> line_turn[3][from] & 077] & (board.piece[black_rook]
-          | board.piece[black_queen])) && black_see(move))
+        >> line_turn[3][from] & 077] & (board.piece[black_rook]
+        | board.piece[black_queen])) && black_see(move))
         list++->move = move;
     }
 
@@ -6840,8 +6856,8 @@ type_move_list* black_check(type_move_list* list, uint64_t mask) {
 
       if ((position->black_attack & square_set[to]
         || bitboard_line_obscured[3][from][board.occupied_90_left
-          >> line_turn[3][from] & 077] & (board.piece[black_rook]
-          | board.piece[black_queen])) && black_see(move))
+        >> line_turn[3][from] & 077] & (board.piece[black_rook]
+        | board.piece[black_queen])) && black_see(move))
         list++->move = move;
     }
   }
@@ -6855,8 +6871,8 @@ type_move_list* black_check(type_move_list* list, uint64_t mask) {
 
       if ((position->black_attack & square_set[to]
         || bitboard_line_obscured[3][from][board.occupied_90_left
-          >> line_turn[3][from] & 077] & (board.piece[black_rook]
-          | board.piece[black_queen])) && black_see(move))
+        >> line_turn[3][from] & 077] & (board.piece[black_rook]
+        | board.piece[black_queen])) && black_see(move))
         list++->move = move;
     }
 
@@ -6868,8 +6884,8 @@ type_move_list* black_check(type_move_list* list, uint64_t mask) {
 
       if ((position->black_attack & square_set[to]
         || bitboard_line_obscured[3][from][board.occupied_90_left
-          >> line_turn[3][from] & 077] & (board.piece[black_rook]
-          | board.piece[black_queen])) && black_see(move))
+        >> line_turn[3][from] & 077] & (board.piece[black_rook]
+        | board.piece[black_queen])) && black_see(move))
         list++->move = move;
     }
   }
@@ -6924,13 +6940,15 @@ type_move_list* white_evasion(type_move_list* list, uint64_t mask2) {
     c = board.square[to];
 
     if (to >= a8) {
-      (list++)->move = (070000 | (((to) - 9) << 6) | to)
+      (list++)->move = (070000 | (((to)-9) << 6) | to)
         | (0x20 << 24) + capture_value[white_pawn][c];
-      (list++)->move = (040000 | (((to) - 9) << 6) | to) | (0);
-      (list++)->move = (060000 | (((to) - 9) << 6) | to) | (0);
-      (list++)->move = (050000 | (((to) - 9) << 6) | to) | (0);
+      (list++)->move = (040000 | (((to)-9) << 6) | to) | (0);
+      (list++)->move = (060000 | (((to)-9) << 6) | to) | (0);
+      (list++)->move = (050000 | (((to)-9) << 6) | to) | (0);
     }
-    else { (list++)->move = ((((to) - 9) << 6) | to) | (capture_value[white_pawn][c]); }
+    else {
+      (list++)->move = ((((to)-9) << 6) | to) | (capture_value[white_pawn][c]);
+    }
   }
 
   if ((board.piece[white_pawn] & ~0x0101010101010101)
@@ -6939,26 +6957,28 @@ type_move_list* white_evasion(type_move_list* list, uint64_t mask2) {
     c = board.square[to];
 
     if (to >= a8) {
-      (list++)->move = (070000 | (((to) - 7) << 6) | to)
+      (list++)->move = (070000 | (((to)-7) << 6) | to)
         | (0x20 << 24) + capture_value[white_pawn][c];
-      (list++)->move = (040000 | (((to) - 7) << 6) | to) | (0);
-      (list++)->move = (060000 | (((to) - 7) << 6) | to) | (0);
-      (list++)->move = (050000 | (((to) - 7) << 6) | to) | (0);
+      (list++)->move = (040000 | (((to)-7) << 6) | to) | (0);
+      (list++)->move = (060000 | (((to)-7) << 6) | to) | (0);
+      (list++)->move = (050000 | (((to)-7) << 6) | to) | (0);
     }
-    else { (list++)->move = ((((to) - 7) << 6) | to) | (capture_value[white_pawn][c]); }
+    else {
+      (list++)->move = ((((to)-7) << 6) | to) | (capture_value[white_pawn][c]);
+    }
   }
   to = position->en_passant;
 
   if (to) {
     if ((board.piece[white_pawn] & ~0x8080808080808080) << 9 & square_set[to]
       && square_set[(to - 8)] & mask2) {
-      (list++)->move = (030000 | (((to) - 9) << 6) | to)
+      (list++)->move = (030000 | (((to)-9) << 6) | to)
         | capture_value[white_pawn][black_pawn];
     }
 
     if ((board.piece[white_pawn] & ~0x0101010101010101) << 7 & square_set[to]
       && square_set[(to - 8)] & mask2) {
-      (list++)->move = (030000 | (((to) - 7) << 6) | to)
+      (list++)->move = (030000 | (((to)-7) << 6) | to)
         | capture_value[white_pawn][black_pawn];
     }
   }
@@ -6976,7 +6996,9 @@ type_move_list* white_evasion(type_move_list* list, uint64_t mask2) {
       list++->move = 060000 | from << 6 | from + 8 | 0;
       list++->move = 050000 | from << 6 | from + 8 | 0;
     }
-    else { list++->move = from << 6 | from + 8 | capture_value[white_pawn][0]; }
+    else {
+      list++->move = from << 6 | from + 8 | capture_value[white_pawn][0];
+    }
   }
   T = board.piece[white_pawn] & (((mask2 & board.piece[occupied_black])
     ^ mask2) >> 16 & 0x000000000000ff00 & ~board.occupied_total >> 8);
@@ -7003,7 +7025,7 @@ type_move_list* white_evasion(type_move_list* list, uint64_t mask2) {
     square = bsf(U);
     T = (bitboard_line_obscured[1][square][board.occupied_45_right >> line_turn[1][square] & 077]
       | bitboard_line_obscured[0][square][board.occupied_45_left
-        >> line_turn[0][square] & 077]) & mask2;
+      >> line_turn[0][square] & 077]) & mask2;
 
     while (T) {
       to = bsf(T);
@@ -7017,7 +7039,7 @@ type_move_list* white_evasion(type_move_list* list, uint64_t mask2) {
     square = bsf(U);
     T = (bitboard_line_obscured[2][square][board.occupied_total >> line_turn[2][square] & 077]
       | bitboard_line_obscured[3][square][board.occupied_90_left
-        >> line_turn[3][square] & 077]) & mask2;
+      >> line_turn[3][square] & 077]) & mask2;
 
     while (T) {
       to = bsf(T);
@@ -7032,8 +7054,8 @@ type_move_list* white_evasion(type_move_list* list, uint64_t mask2) {
     T = (bitboard_line_obscured[2][square][board.occupied_total >> line_turn[2][square] & 077]
       | bitboard_line_obscured[3][square][board.occupied_90_left >> line_turn[3][square] & 077]
       | (bitboard_line_obscured[1][square][board.occupied_45_right >> line_turn[1][square] & 077]
-        | bitboard_line_obscured[0][square][board.occupied_45_left
-          >> line_turn[0][square] & 077])) & mask2;
+      | bitboard_line_obscured[0][square][board.occupied_45_left
+      >> line_turn[0][square] & 077])) & mask2;
 
     while (T) {
       to = bsf(T);
@@ -7054,17 +7076,17 @@ type_move_list* white_gain(type_move_list* list, const int score) {
   const type_move_list* sm = list;
 
   for (U = (board.piece[white_pawn] & 0x0000ffffffffff00) << 8 & empty_squares; U;
-       U &= U - 1) {
+    U &= U - 1) {
     to = bsf(U);
 
     if ((to & 070) == 020 && board.square[(to + 8)] == 0) {
       if (const int val = max_increase[white_pawn][((to - 8) << 6 | to + 8) & 07777]; val >= score)
-        (list++)->move = ((((to) - 8) << 6) | ((to) + 8)) | (val << 16);
+        (list++)->move = ((((to)-8) << 6) | ((to)+8)) | (val << 16);
     }
-    value = static_cast<int>(max_increase[white_pawn][((((to) - 8) << 6) | to) & 07777]);
+    value = static_cast<int>(max_increase[white_pawn][((((to)-8) << 6) | to) & 07777]);
 
     if (value >= score)
-      (list++)->move = ((((to) - 8) << 6) | to) | (value << 16);
+      (list++)->move = ((((to)-8) << 6) | to) | (value << 16);
   }
 
   for (U = board.piece[white_knight]; U; U &= U - 1) {
@@ -7085,7 +7107,7 @@ type_move_list* white_gain(type_move_list* list, const int score) {
     square = bsf(U);
     T = (bitboard_line_obscured[1][square][board.occupied_45_right >> line_turn[1][square] & 077]
       | bitboard_line_obscured[0][square][board.occupied_45_left
-        >> line_turn[0][square] & 077]) & empty_squares;
+      >> line_turn[0][square] & 077]) & empty_squares;
 
     while (T) {
       to = bsf(T);
@@ -7100,7 +7122,7 @@ type_move_list* white_gain(type_move_list* list, const int score) {
   for (U = board.piece[white_queen_bishop]; U; U &= U - 1) {
     square = bsf(U);
     T = (bitboard_line_obscured[1][square][board.occupied_45_right >> line_turn[1][square] & 077]
-        | bitboard_line_obscured[0][square][board.occupied_45_left >> line_turn[0][square] & 077]) &
+      | bitboard_line_obscured[0][square][board.occupied_45_left >> line_turn[0][square] & 077]) &
       empty_squares;
 
     while (T) {
@@ -7117,7 +7139,7 @@ type_move_list* white_gain(type_move_list* list, const int score) {
     square = bsf(U);
     T = (bitboard_line_obscured[2][square][board.occupied_total >> line_turn[2][square] & 077]
       | bitboard_line_obscured[3][square][board.occupied_90_left
-        >> line_turn[3][square] & 077]) & empty_squares;
+      >> line_turn[3][square] & 077]) & empty_squares;
 
     while (T) {
       to = bsf(T);
@@ -7134,8 +7156,8 @@ type_move_list* white_gain(type_move_list* list, const int score) {
     T = (bitboard_line_obscured[2][square][board.occupied_total >> line_turn[2][square] & 077]
       | bitboard_line_obscured[3][square][board.occupied_90_left >> line_turn[3][square] & 077]
       | (bitboard_line_obscured[1][square][board.occupied_45_right >> line_turn[1][square] & 077]
-        | bitboard_line_obscured[0][square][board.occupied_45_left
-          >> line_turn[0][square] & 077])) & empty_squares;
+      | bitboard_line_obscured[0][square][board.occupied_45_left
+      >> line_turn[0][square] & 077])) & empty_squares;
 
     while (T) {
       to = bsf(T);
@@ -7181,25 +7203,25 @@ type_move_list* white_capture(type_move_list* list, const uint64_t mask) {
 
   if (to) {
     if ((board.piece[white_pawn] & ~0x0101010101010101) << 7 & square_set[to]) {
-      (list++)->move = (030000 | (((to) - 7) << 6) | to)
+      (list++)->move = (030000 | (((to)-7) << 6) | to)
         | capture_value[white_pawn][black_pawn];
     }
 
     if ((board.piece[white_pawn] & ~0x8080808080808080) << 9 & square_set[to]) {
-      (list++)->move = (030000 | (((to) - 9) << 6) | to)
+      (list++)->move = (030000 | (((to)-9) << 6) | to)
         | capture_value[white_pawn][black_pawn];
     }
   }
 
-uint64_t T = (board.piece[white_pawn] & ~0x0101010101010101) << 7 & ~0xff00000000000000 & mask;
+  uint64_t T = (board.piece[white_pawn] & ~0x0101010101010101) << 7 & ~0xff00000000000000 & mask;
 
-	if ((mask & position->white_attack) == 0)
-		goto empty_target;
+  if ((mask & position->white_attack) == 0)
+    goto empty_target;
 
   while (T) {
     to = bsf(T);
     c = board.square[to];
-    (list++)->move = ((((to) - 7) << 6) | to) | (capture_value[white_pawn][c]);
+    (list++)->move = ((((to)-7) << 6) | to) | (capture_value[white_pawn][c]);
     T &= T - 1;
   }
   T = (board.piece[white_pawn] & ~0x8080808080808080) << 9 & ~0xff00000000000000 & mask;
@@ -7207,7 +7229,7 @@ uint64_t T = (board.piece[white_pawn] & ~0x0101010101010101) << 7 & ~0xff0000000
   while (T) {
     to = bsf(T);
     c = board.square[to];
-    (list++)->move = ((((to) - 9) << 6) | to) | (capture_value[white_pawn][c]);
+    (list++)->move = ((((to)-9) << 6) | to) | (capture_value[white_pawn][c]);
     T &= T - 1;
   }
 
@@ -7285,7 +7307,9 @@ empty_target:
     if (board.square[to] == 0) {
       list++->move = 070000 | square << 6 | to | 0xd8 << 24;
 
-      if (attack_knight[to] & board.piece[black_king]) { list++->move = 040000 | square << 6 | to | 0xc2 << 24; }
+      if (attack_knight[to] & board.piece[black_king]) {
+        list++->move = 040000 | square << 6 | to | 0xc2 << 24;
+      }
     }
     to = square + 7;
 
@@ -7337,26 +7361,26 @@ type_move_list* white_ordinary(type_move_list* list) {
 
   if (board.piece[white_queen] | board.piece[white_rook])
     L = bitboard_line_obscured[2][king_square_rerun][board.occupied_total
-        >> line_turn[2][king_square_rerun] & 077]
-      | bitboard_line_obscured[3][king_square_rerun][board.occupied_90_left
-        >> line_turn[3][king_square_rerun] & 077];
+    >> line_turn[2][king_square_rerun] & 077]
+    | bitboard_line_obscured[3][king_square_rerun][board.occupied_90_left
+    >> line_turn[3][king_square_rerun] & 077];
 
   if (board.piece[white_queen]
     | (board.piece[white_king_bishop] | board.piece[white_queen_bishop]))
     next = bitboard_line_obscured[1][king_square_rerun][board.occupied_45_right
-        >> line_turn[1][king_square_rerun] & 077]
-      | bitboard_line_obscured[0][king_square_rerun][board.occupied_45_left
-        >> line_turn[0][king_square_rerun] & 077];
+    >> line_turn[1][king_square_rerun] & 077]
+    | bitboard_line_obscured[0][king_square_rerun][board.occupied_45_left
+    >> line_turn[0][king_square_rerun] & 077];
 
   for (U = (board.piece[white_pawn] & 0x0000ffffffffff00) << 8 & empty_squares; U;
-       U &= U - 1) {
+    U &= U - 1) {
     to = bsf(U);
 
     if ((to & 070) == 020 && board.square[(to + 8)] == 0) {
-      (list++)->move = ((((to) - 8) << 6) | ((to) + 8)) | ((square_set[((to) + 8)] & (K)) ? 0x8000 : 0)
+      (list++)->move = ((((to)-8) << 6) | ((to)+8)) | ((square_set[((to)+8)] & (K)) ? 0x8000 : 0)
         | history_table[white_pawn][(to + 8)] << 16;
     }
-    (list++)->move = ((((to) - 8) << 6) | to) | ((square_set[to] & (K)) ? 0x8000 : 0)
+    (list++)->move = ((((to)-8) << 6) | to) | ((square_set[to] & (K)) ? 0x8000 : 0)
       | history_table[white_pawn][to] << 16;
   }
 
@@ -7365,8 +7389,8 @@ type_move_list* white_ordinary(type_move_list* list) {
     T = (bitboard_line_obscured[2][square][board.occupied_total >> line_turn[2][square] & 077]
       | bitboard_line_obscured[3][square][board.occupied_90_left >> line_turn[3][square] & 077]
       | (bitboard_line_obscured[1][square][board.occupied_45_right >> line_turn[1][square] & 077]
-        | bitboard_line_obscured[0][square][board.occupied_45_left
-          >> line_turn[0][square] & 077])) & empty_squares;
+      | bitboard_line_obscured[0][square][board.occupied_45_left
+      >> line_turn[0][square] & 077])) & empty_squares;
 
     while (T) {
       to = bsf(T);
@@ -7380,7 +7404,7 @@ type_move_list* white_ordinary(type_move_list* list) {
     square = bsf(U);
     T = (bitboard_line_obscured[2][square][board.occupied_total >> line_turn[2][square] & 077]
       | bitboard_line_obscured[3][square][board.occupied_90_left
-        >> line_turn[3][square] & 077]) & empty_squares;
+      >> line_turn[3][square] & 077]) & empty_squares;
 
     while (T) {
       to = bsf(T);
@@ -7394,7 +7418,7 @@ type_move_list* white_ordinary(type_move_list* list) {
     square = bsf(U);
     T = (bitboard_line_obscured[1][square][board.occupied_45_right >> line_turn[1][square] & 077]
       | bitboard_line_obscured[0][square][board.occupied_45_left
-        >> line_turn[0][square] & 077]) & empty_squares;
+      >> line_turn[0][square] & 077]) & empty_squares;
 
     while (T) {
       to = bsf(T);
@@ -7434,7 +7458,7 @@ type_move_list* white_ordinary(type_move_list* list) {
     if (board.square[to] == 0) {
       if ((attack_knight[to] & board.piece[black_king]) == 0)
         list++->move = 040000 | square << 6 | to | (square_set[to] & 0 ? 0x8000 : 0)
-          | history_table[white_pawn][to] << 16;
+        | history_table[white_pawn][to] << 16;
       list++->move = 060000 | square << 6 | to | (square_set[to] & 0 ? 0x8000 : 0)
         | history_table[white_pawn][to] << 16;
       list++->move = 050000 | square << 6 | to | (square_set[to] & 0 ? 0x8000 : 0)
@@ -7445,7 +7469,7 @@ type_move_list* white_ordinary(type_move_list* list) {
     if (square != a7 && square_set[to] & board.piece[occupied_black]) {
       if ((attack_knight[to] & board.piece[black_king]) == 0)
         list++->move = 040000 | square << 6 | to | (square_set[to] & 0 ? 0x8000 : 0)
-          | history_table[white_pawn][to] << 16;
+        | history_table[white_pawn][to] << 16;
       list++->move = 060000 | square << 6 | to | (square_set[to] & 0 ? 0x8000 : 0)
         | history_table[white_pawn][to] << 16;
       list++->move = 050000 | square << 6 | to | (square_set[to] & 0 ? 0x8000 : 0)
@@ -7456,7 +7480,7 @@ type_move_list* white_ordinary(type_move_list* list) {
     if (square != h7 && square_set[to] & board.piece[occupied_black]) {
       if ((attack_knight[to] & board.piece[black_king]) == 0)
         list++->move = 040000 | square << 6 | to | (square_set[to] & 0 ? 0x8000 : 0)
-          | history_table[white_pawn][to] << 16;
+        | history_table[white_pawn][to] << 16;
       list++->move = 060000 | square << 6 | to | (square_set[to] & 0 ? 0x8000 : 0)
         | history_table[white_pawn][to] << 16;
       list++->move = 050000 | square << 6 | to | (square_set[to] & 0 ? 0x8000 : 0)
@@ -7478,7 +7502,7 @@ type_move_list* white_check(type_move_list* list, uint64_t mask) {
   king_square = board.black_king;
 
   for (U = position->white_xray & board.piece[occupied_white]; U;
-       U &= U - 1) {
+    U &= U - 1) {
     from = bsf(U);
     piece = board.square[from];
 
@@ -7547,7 +7571,7 @@ type_move_list* white_check(type_move_list* list, uint64_t mask) {
 
   while (T) {
     to = bsf(T);
-    (list++)->move = (((to) - 7) << 6) | to;
+    (list++)->move = (((to)-7) << 6) | to;
     T &= T - 1;
   }
   T = (board.piece[white_pawn] & ~0x8080808080808080)
@@ -7556,7 +7580,7 @@ type_move_list* white_check(type_move_list* list, uint64_t mask) {
 
   while (T) {
     to = bsf(T);
-    (list++)->move = (((to) - 9) << 6) | to;
+    (list++)->move = (((to)-9) << 6) | to;
     T &= T - 1;
   }
 
@@ -7565,15 +7589,15 @@ type_move_list* white_check(type_move_list* list, uint64_t mask) {
     T = (bitboard_line_obscured[2][square][board.occupied_total >> line_turn[2][square] & 077]
       | bitboard_line_obscured[3][square][board.occupied_90_left >> line_turn[3][square] & 077]
       | (bitboard_line_obscured[1][square][board.occupied_45_right >> line_turn[1][square] & 077]
-        | bitboard_line_obscured[0][square][board.occupied_45_left
-          >> line_turn[0][square] & 077])) & (bitboard_line_obscured[2][king_square][board.
-        occupied_total >> line_turn[2][king_square] & 077]
+      | bitboard_line_obscured[0][square][board.occupied_45_left
+      >> line_turn[0][square] & 077])) & (bitboard_line_obscured[2][king_square][board.
+      occupied_total >> line_turn[2][king_square] & 077]
       | bitboard_line_obscured[3][king_square][board.occupied_90_left
-        >> line_turn[3][king_square] & 077]
+      >> line_turn[3][king_square] & 077]
       | (bitboard_line_obscured[1][king_square][board.occupied_45_right
-          >> line_turn[1][king_square] & 077]
-        | bitboard_line_obscured[0][king_square][board.occupied_45_left
-          >> line_turn[0][king_square] & 077])) & mask;
+      >> line_turn[1][king_square] & 077]
+      | bitboard_line_obscured[0][king_square][board.occupied_45_left
+      >> line_turn[0][king_square] & 077])) & mask;
 
     while (T) {
       to = bsf(T);
@@ -7593,10 +7617,10 @@ type_move_list* white_check(type_move_list* list, uint64_t mask) {
     square = bsf(U);
     T = (bitboard_line_obscured[2][square][board.occupied_total >> line_turn[2][square] & 077]
       | bitboard_line_obscured[3][square][board.occupied_90_left
-        >> line_turn[3][square] & 077]) & (bitboard_line_obscured[2][king_square][board.
-        occupied_total >> line_turn[2][king_square] & 077]
+      >> line_turn[3][square] & 077]) & (bitboard_line_obscured[2][king_square][board.
+      occupied_total >> line_turn[2][king_square] & 077]
       | bitboard_line_obscured[3][king_square][board.occupied_90_left
-        >> line_turn[3][king_square] & 077]) & mask;
+      >> line_turn[3][king_square] & 077]) & mask;
 
     while (T) {
       to = bsf(T);
@@ -7616,10 +7640,10 @@ type_move_list* white_check(type_move_list* list, uint64_t mask) {
     square = bsf(U);
     T = (bitboard_line_obscured[1][square][board.occupied_45_right >> line_turn[1][square] & 077]
       | bitboard_line_obscured[0][square][board.occupied_45_left
-        >> line_turn[0][square] & 077]) & (bitboard_line_obscured[1][king_square][board.
-        occupied_45_right >> line_turn[1][king_square] & 077]
+      >> line_turn[0][square] & 077]) & (bitboard_line_obscured[1][king_square][board.
+      occupied_45_right >> line_turn[1][king_square] & 077]
       | bitboard_line_obscured[0][king_square][board.occupied_45_left
-        >> line_turn[0][king_square] & 077]) & mask;
+      >> line_turn[0][king_square] & 077]) & mask;
 
     while (T) {
       to = bsf(T);
@@ -7660,8 +7684,8 @@ type_move_list* white_check(type_move_list* list, uint64_t mask) {
 
       if ((position->white_attack & square_set[to]
         || bitboard_line_obscured[3][from][board.occupied_90_left
-          >> line_turn[3][from] & 077] & (board.piece[white_rook]
-          | board.piece[white_queen])) && white_see(move))
+        >> line_turn[3][from] & 077] & (board.piece[white_rook]
+        | board.piece[white_queen])) && white_see(move))
         list++->move = move;
     }
 
@@ -7673,8 +7697,8 @@ type_move_list* white_check(type_move_list* list, uint64_t mask) {
 
       if ((position->white_attack & square_set[to]
         || bitboard_line_obscured[3][from][board.occupied_90_left
-          >> line_turn[3][from] & 077] & (board.piece[white_rook]
-          | board.piece[white_queen])) && white_see(move))
+        >> line_turn[3][from] & 077] & (board.piece[white_rook]
+        | board.piece[white_queen])) && white_see(move))
         list++->move = move;
     }
   }
@@ -7688,8 +7712,8 @@ type_move_list* white_check(type_move_list* list, uint64_t mask) {
 
       if ((position->white_attack & square_set[to]
         || bitboard_line_obscured[3][from][board.occupied_90_left
-          >> line_turn[3][from] & 077] & (board.piece[white_rook]
-          | board.piece[white_queen])) && white_see(move))
+        >> line_turn[3][from] & 077] & (board.piece[white_rook]
+        | board.piece[white_queen])) && white_see(move))
         list++->move = move;
     }
 
@@ -7701,8 +7725,8 @@ type_move_list* white_check(type_move_list* list, uint64_t mask) {
 
       if ((position->white_attack & square_set[to]
         || bitboard_line_obscured[3][from][board.occupied_90_left
-          >> line_turn[3][from] & 077] & (board.piece[white_rook]
-          | board.piece[white_queen])) && white_see(move))
+        >> line_turn[3][from] & 077] & (board.piece[white_rook]
+        | board.piece[white_queen])) && white_see(move))
         list++->move = move;
     }
   }
@@ -7711,398 +7735,398 @@ type_move_list* white_check(type_move_list* list, uint64_t mask) {
 }
 
 uint32_t black_next(type_next* next) {
-  type_move_list *p, *q, *move_list;
+  type_move_list* p, * q, * move_list;
   uint32_t move, temp;
 
   switch (next->phase) {
-    case trans_value: next->phase = gen_captures;
+  case trans_value: next->phase = gen_captures;
 
-      if (next->trans_move && black_ok(next->trans_move))
-        return next->trans_move;
-      [[fallthrough]];
+    if (next->trans_move && black_ok(next->trans_move))
+      return next->trans_move;
+    [[fallthrough]];
 
-    case gen_captures: next->phase = capture_moves;
-      next->move = 0;
-      black_capture(next->list, board.piece[occupied_white]);
-      [[fallthrough]];
+  case gen_captures: next->phase = capture_moves;
+    next->move = 0;
+    black_capture(next->list, board.piece[occupied_white]);
+    [[fallthrough]];
 
-    case capture_moves: while (true) {
-        p = next->list + next->move;
-        move = p->move;
+  case capture_moves: while (true) {
+    p = next->list + next->move;
+    move = p->move;
 
-        if (!move)
-          break;
-        q = p + 1;
-        next->move++;
+    if (!move)
+      break;
+    q = p + 1;
+    next->move++;
 
-        while (q->move) {
-          if (move < q->move) {
-            temp = q->move;
-            q->move = move;
-            move = temp;
-          }
-          q++;
-        }
-
-        if ((move & 0x7fff) == next->trans_move)
-          continue;
-
-        if (!(move & 0x300000) && !black_see(move))
-          next->bad_captures[next->bad_capture++] = move;
-        else
-          break;
+    while (q->move) {
+      if (move < q->move) {
+        temp = q->move;
+        q->move = move;
+        move = temp;
       }
+      q++;
+    }
 
-      if (move)
-        return move;
-      next->phase = killer_1;
-      move = position->killer_1;
+    if ((move & 0x7fff) == next->trans_move)
+      continue;
 
-      if (move && move != next->trans_move && board.square[(move & 077)] == 0
-        && black_ok(move))
-        return move;
-      [[fallthrough]];
+    if (!(move & 0x300000) && !black_see(move))
+      next->bad_captures[next->bad_capture++] = move;
+    else
+      break;
+  }
 
-    case killer_1: next->phase = killer_2;
-      move = position->killer_2;
+                    if (move)
+                      return move;
+                    next->phase = killer_1;
+                    move = position->killer_1;
 
-      if (move && move != next->trans_move && board.square[(move & 077)] == 0
-        && black_ok(move))
-        return move;
-      [[fallthrough]];
+                    if (move && move != next->trans_move && board.square[(move & 077)] == 0
+                      && black_ok(move))
+                      return move;
+                    [[fallthrough]];
 
-    case killer_2: next->phase = ordinary_moves;
-      next->move = 0;
-      move_list = black_ordinary(next->list);
-      sort(next->list, move_list, next->trans_move, position->killer_1, position->killer_2);
-      [[fallthrough]];
+  case killer_1: next->phase = killer_2;
+    move = position->killer_2;
 
-    case ordinary_moves: move = (next->list + next->move)->move;
-      next->move++;
-
-      if (move)
-        return move;
-      next->phase = bad_captures;
-      next->bad_captures[next->bad_capture] = 0;
-      next->move = 0;
-      [[fallthrough]];
-
-    case bad_captures: move = next->bad_captures[next->move++];
+    if (move && move != next->trans_move && board.square[(move & 077)] == 0
+      && black_ok(move))
       return move;
+    [[fallthrough]];
 
-    case trans_value_2: next->phase = gen_captures_2;
+  case killer_2: next->phase = ordinary_moves;
+    next->move = 0;
+    move_list = black_ordinary(next->list);
+    sort(next->list, move_list, next->trans_move, position->killer_1, position->killer_2);
+    [[fallthrough]];
 
-      if (next->trans_move && black_ok(next->trans_move))
-        return next->trans_move;
-      [[fallthrough]];
+  case ordinary_moves: move = (next->list + next->move)->move;
+    next->move++;
 
-    case gen_captures_2: next->phase = capture_moves_2;
-      next->move = 0;
-      black_capture(next->list, next->target);
-      [[fallthrough]];
+    if (move)
+      return move;
+    next->phase = bad_captures;
+    next->bad_captures[next->bad_capture] = 0;
+    next->move = 0;
+    [[fallthrough]];
 
-    case capture_moves_2: while (true) {
-        p = next->list + next->move;
-        move = p->move;
+  case bad_captures: move = next->bad_captures[next->move++];
+    return move;
 
-        if (!move)
-          break;
-        q = p + 1;
-        next->move++;
+  case trans_value_2: next->phase = gen_captures_2;
 
-        while (q->move) {
-          if (move < q->move) {
-            temp = q->move;
-            q->move = move;
-            move = temp;
-          }
-          q++;
-        }
+    if (next->trans_move && black_ok(next->trans_move))
+      return next->trans_move;
+    [[fallthrough]];
 
-        if ((move & 0x7fff) == next->trans_move)
-          continue;
-        break;
+  case gen_captures_2: next->phase = capture_moves_2;
+    next->move = 0;
+    black_capture(next->list, next->target);
+    [[fallthrough]];
+
+  case capture_moves_2: while (true) {
+    p = next->list + next->move;
+    move = p->move;
+
+    if (!move)
+      break;
+    q = p + 1;
+    next->move++;
+
+    while (q->move) {
+      if (move < q->move) {
+        temp = q->move;
+        q->move = move;
+        move = temp;
       }
+      q++;
+    }
 
-      if (move)
-        return move;
-      next->move = 0;
-      next->phase = quiet_checks;
-      black_check(next->list, next->target);
-      [[fallthrough]];
+    if ((move & 0x7fff) == next->trans_move)
+      continue;
+    break;
+  }
 
-    case quiet_checks: move = (next->list + next->move)->move;
-      next->move++;
-      return move;
+                      if (move)
+                        return move;
+                      next->move = 0;
+                      next->phase = quiet_checks;
+                      black_check(next->list, next->target);
+                      [[fallthrough]];
 
-    case check_evasions: move = (next->list + next->move)->move;
-      next->move++;
-      return move;
+  case quiet_checks: move = (next->list + next->move)->move;
+    next->move++;
+    return move;
 
-    case trans_value_3: next->phase = gen_captures_3;
+  case check_evasions: move = (next->list + next->move)->move;
+    next->move++;
+    return move;
 
-      if (next->trans_move && black_ok(next->trans_move))
-        return next->trans_move;
-      [[fallthrough]];
+  case trans_value_3: next->phase = gen_captures_3;
 
-    case gen_captures_3: next->phase = capture_moves_3;
-      next->move = 0;
-      black_capture(next->list, board.piece[occupied_white]);
-      [[fallthrough]];
+    if (next->trans_move && black_ok(next->trans_move))
+      return next->trans_move;
+    [[fallthrough]];
 
-    case capture_moves_3: while (true) {
-        p = next->list + next->move;
-        move = p->move;
+  case gen_captures_3: next->phase = capture_moves_3;
+    next->move = 0;
+    black_capture(next->list, board.piece[occupied_white]);
+    [[fallthrough]];
 
-        if (!move)
-          break;
-        q = p + 1;
-        next->move++;
+  case capture_moves_3: while (true) {
+    p = next->list + next->move;
+    move = p->move;
 
-        while (q->move) {
-          if (move < q->move) {
-            temp = q->move;
-            q->move = move;
-            move = temp;
-          }
-          q++;
-        }
+    if (!move)
+      break;
+    q = p + 1;
+    next->move++;
 
-        if ((move & 0x7fff) == next->trans_move)
-          continue;
-        break;
+    while (q->move) {
+      if (move < q->move) {
+        temp = q->move;
+        q->move = move;
+        move = temp;
       }
+      q++;
+    }
 
-      if (move)
-        return move;
-      next->move = 0;
-      next->phase = quiet_checks_3;
-      black_check(next->list, board.piece[occupied_white]);
-      [[fallthrough]];
+    if ((move & 0x7fff) == next->trans_move)
+      continue;
+    break;
+  }
 
-    case quiet_checks_3: move = (next->list + next->move)->move;
-      next->move++;
+                      if (move)
+                        return move;
+                      next->move = 0;
+                      next->phase = quiet_checks_3;
+                      black_check(next->list, board.piece[occupied_white]);
+                      [[fallthrough]];
 
-      if (move)
-        return move;
-      next->move = 0;
-      next->phase = phase;
-      black_gain(next->list, next->mask);
-      [[fallthrough]];
+  case quiet_checks_3: move = (next->list + next->move)->move;
+    next->move++;
 
-    case phase: move = (next->list + next->move)->move;
-      next->move++;
+    if (move)
       return move;
-    default: ;
+    next->move = 0;
+    next->phase = phase;
+    black_gain(next->list, next->mask);
+    [[fallthrough]];
+
+  case phase: move = (next->list + next->move)->move;
+    next->move++;
+    return move;
+  default:;
   }
   return 0;
 }
 
 uint32_t white_next(type_next* next) {
-  type_move_list *p, *q, *move_list;
+  type_move_list* p, * q, * move_list;
   uint32_t move, temp;
 
   switch (next->phase) {
-    case trans_value: next->phase = gen_captures;
+  case trans_value: next->phase = gen_captures;
 
-      if (next->trans_move && white_ok(next->trans_move))
-        return next->trans_move;
-      [[fallthrough]];
+    if (next->trans_move && white_ok(next->trans_move))
+      return next->trans_move;
+    [[fallthrough]];
 
-    case gen_captures: next->phase = capture_moves;
-      next->move = 0;
-      white_capture(next->list, board.piece[occupied_black]);
-      [[fallthrough]];
+  case gen_captures: next->phase = capture_moves;
+    next->move = 0;
+    white_capture(next->list, board.piece[occupied_black]);
+    [[fallthrough]];
 
-    case capture_moves: while (true) {
-        p = next->list + next->move;
-        move = p->move;
+  case capture_moves: while (true) {
+    p = next->list + next->move;
+    move = p->move;
 
-        if (!move)
-          break;
-        q = p + 1;
-        next->move++;
+    if (!move)
+      break;
+    q = p + 1;
+    next->move++;
 
-        while (q->move) {
-          if (move < q->move) {
-            temp = q->move;
-            q->move = move;
-            move = temp;
-          }
-          q++;
-        }
-
-        if ((move & 0x7fff) == next->trans_move)
-          continue;
-
-        if (!(move & 0x300000) && !white_see(move))
-          next->bad_captures[next->bad_capture++] = move;
-        else
-          break;
+    while (q->move) {
+      if (move < q->move) {
+        temp = q->move;
+        q->move = move;
+        move = temp;
       }
+      q++;
+    }
 
-      if (move)
-        return move;
-      next->phase = killer_1;
-      move = position->killer_1;
+    if ((move & 0x7fff) == next->trans_move)
+      continue;
 
-      if (move && move != next->trans_move && board.square[(move & 077)] == 0
-        && white_ok(move))
-        return move;
-      [[fallthrough]];
+    if (!(move & 0x300000) && !white_see(move))
+      next->bad_captures[next->bad_capture++] = move;
+    else
+      break;
+  }
 
-    case killer_1: next->phase = killer_2;
-      move = position->killer_2;
+                    if (move)
+                      return move;
+                    next->phase = killer_1;
+                    move = position->killer_1;
 
-      if (move && move != next->trans_move && board.square[(move & 077)] == 0
-        && white_ok(move))
-        return move;
-      [[fallthrough]];
+                    if (move && move != next->trans_move && board.square[(move & 077)] == 0
+                      && white_ok(move))
+                      return move;
+                    [[fallthrough]];
 
-    case killer_2: next->phase = ordinary_moves;
-      next->move = 0;
-      move_list = white_ordinary(next->list);
-      sort(next->list, move_list, next->trans_move, position->killer_1,
-           position->killer_2);
-      [[fallthrough]];
+  case killer_1: next->phase = killer_2;
+    move = position->killer_2;
 
-    case ordinary_moves: move = (next->list + next->move)->move;
-      next->move++;
-
-      if (move)
-        return move;
-      next->phase = bad_captures;
-      next->bad_captures[next->bad_capture] = 0;
-      next->move = 0;
-      [[fallthrough]];
-
-    case bad_captures: move = next->bad_captures[next->move++];
+    if (move && move != next->trans_move && board.square[(move & 077)] == 0
+      && white_ok(move))
       return move;
+    [[fallthrough]];
 
-    case trans_value_2: next->phase = gen_captures_2;
+  case killer_2: next->phase = ordinary_moves;
+    next->move = 0;
+    move_list = white_ordinary(next->list);
+    sort(next->list, move_list, next->trans_move, position->killer_1,
+      position->killer_2);
+    [[fallthrough]];
 
-      if (next->trans_move && white_ok(next->trans_move))
-        return next->trans_move;
-      [[fallthrough]];
+  case ordinary_moves: move = (next->list + next->move)->move;
+    next->move++;
 
-    case gen_captures_2: next->phase = capture_moves_2;
-      next->move = 0;
-      white_capture(next->list, next->target);
-      [[fallthrough]];
+    if (move)
+      return move;
+    next->phase = bad_captures;
+    next->bad_captures[next->bad_capture] = 0;
+    next->move = 0;
+    [[fallthrough]];
 
-    case capture_moves_2: while (true) {
-        p = next->list + next->move;
-        move = p->move;
+  case bad_captures: move = next->bad_captures[next->move++];
+    return move;
 
-        if (!move)
-          break;
-        q = p + 1;
-        next->move++;
+  case trans_value_2: next->phase = gen_captures_2;
 
-        while (q->move) {
-          if (move < q->move) {
-            temp = q->move;
-            q->move = move;
-            move = temp;
-          }
-          q++;
-        }
+    if (next->trans_move && white_ok(next->trans_move))
+      return next->trans_move;
+    [[fallthrough]];
 
-        if ((move & 0x7fff) == next->trans_move)
-          continue;
-        break;
+  case gen_captures_2: next->phase = capture_moves_2;
+    next->move = 0;
+    white_capture(next->list, next->target);
+    [[fallthrough]];
+
+  case capture_moves_2: while (true) {
+    p = next->list + next->move;
+    move = p->move;
+
+    if (!move)
+      break;
+    q = p + 1;
+    next->move++;
+
+    while (q->move) {
+      if (move < q->move) {
+        temp = q->move;
+        q->move = move;
+        move = temp;
       }
+      q++;
+    }
 
-      if (move)
-        return move;
-      next->move = 0;
-      next->phase = quiet_checks;
-      white_check(next->list, next->target);
-      [[fallthrough]];
+    if ((move & 0x7fff) == next->trans_move)
+      continue;
+    break;
+  }
 
-    case quiet_checks: move = (next->list + next->move)->move;
-      next->move++;
-      return move;
+                      if (move)
+                        return move;
+                      next->move = 0;
+                      next->phase = quiet_checks;
+                      white_check(next->list, next->target);
+                      [[fallthrough]];
 
-    case check_evasions: move = (next->list + next->move)->move;
-      next->move++;
-      return move;
+  case quiet_checks: move = (next->list + next->move)->move;
+    next->move++;
+    return move;
 
-    case trans_value_3: next->phase = gen_captures_3;
+  case check_evasions: move = (next->list + next->move)->move;
+    next->move++;
+    return move;
 
-      if (next->trans_move && white_ok(next->trans_move))
-        return next->trans_move;
-      [[fallthrough]];
+  case trans_value_3: next->phase = gen_captures_3;
 
-    case gen_captures_3: next->phase = capture_moves_3;
-      next->move = 0;
-      white_capture(next->list, board.piece[occupied_black]);
-      [[fallthrough]];
+    if (next->trans_move && white_ok(next->trans_move))
+      return next->trans_move;
+    [[fallthrough]];
 
-    case capture_moves_3: while (true) {
-        p = next->list + next->move;
-        move = p->move;
+  case gen_captures_3: next->phase = capture_moves_3;
+    next->move = 0;
+    white_capture(next->list, board.piece[occupied_black]);
+    [[fallthrough]];
 
-        if (!move)
-          break;
-        q = p + 1;
-        next->move++;
+  case capture_moves_3: while (true) {
+    p = next->list + next->move;
+    move = p->move;
 
-        while (q->move) {
-          if (move < q->move) {
-            temp = q->move;
-            q->move = move;
-            move = temp;
-          }
-          q++;
-        }
+    if (!move)
+      break;
+    q = p + 1;
+    next->move++;
 
-        if ((move & 0x7fff) == next->trans_move)
-          continue;
-        break;
+    while (q->move) {
+      if (move < q->move) {
+        temp = q->move;
+        q->move = move;
+        move = temp;
       }
+      q++;
+    }
 
-      if (move)
-        return move;
-      next->move = 0;
-      next->phase = quiet_checks_3;
-      white_check(next->list, board.piece[occupied_black]);
-      [[fallthrough]];
+    if ((move & 0x7fff) == next->trans_move)
+      continue;
+    break;
+  }
 
-    case quiet_checks_3: move = (next->list + next->move)->move;
-      next->move++;
+                      if (move)
+                        return move;
+                      next->move = 0;
+                      next->phase = quiet_checks_3;
+                      white_check(next->list, board.piece[occupied_black]);
+                      [[fallthrough]];
 
-      if (move)
-        return move;
-      next->move = 0;
-      next->phase = phase;
-      white_gain(next->list, next->mask);
-      [[fallthrough]];
+  case quiet_checks_3: move = (next->list + next->move)->move;
+    next->move++;
 
-    case phase: move = (next->list + next->move)->move;
-      next->move++;
+    if (move)
       return move;
-    default: ;
+    next->move = 0;
+    next->phase = phase;
+    white_gain(next->list, next->mask);
+    [[fallthrough]];
+
+  case phase: move = (next->list + next->move)->move;
+    next->move++;
+    return move;
+  default:;
   }
   return 0;
 }
 
 void black_top() {
   int value, hash_score = 0, move_depth = 0,
-      exact_depth = 0;
+    exact_depth = 0;
   uint32_t move, hash_move = 0, exact_move = 0;
-  type_move_list *p, *q, *move_list;
+  type_move_list* p, * q, * move_list;
   const type_position* temp_position = position;
   const int capture_val[16] =
-    {
-      0, 1, 3, 0, 3, 3, 5, 9, 0, 1, 3, 0, 3, 3, 5, 9
-    };
+  {
+    0, 1, 3, 0, 3, 3, 5, 9, 0, 1, 3, 0, 3, 3, 5, 9
+  };
 
   eval(-0x7fff0000, 0x7fff0000, 0);
 
   if (board.white_to_move
-        ? board.piece[white_king] & position->black_attack
-        : board.piece[black_king] & position->white_attack)
+    ? board.piece[white_king] & position->black_attack
+    : board.piece[black_king] & position->white_attack)
     move_list = black_evasion(root_move_list, 0xffffffffffffffff);
   else {
     q = black_capture(root_move_list, board.piece[occupied_white]);
@@ -8137,8 +8161,8 @@ void black_top() {
     ok_immediate = 0;
 
     if (!(board.white_to_move
-            ? board.piece[white_king] & position->black_attack
-            : board.piece[black_king] & position->white_attack))
+      ? board.piece[white_king] & position->black_attack
+      : board.piece[black_king] & position->white_attack))
       value = black_exclude(hash_score - 50, previous_depth - 6, exact_move);
     else
       value = black_exclude_check(hash_score - 50, previous_depth - 6, exact_move);
@@ -8189,8 +8213,8 @@ void black_top() {
 
   if (!root_move_list[0].move) {
     if (board.white_to_move
-          ? board.piece[white_king] & position->black_attack
-          : board.piece[black_king] & position->white_attack)
+      ? board.piece[white_king] & position->black_attack
+      : board.piece[black_king] & position->white_attack)
       best_score = alpha;
     else
       best_score = 0;
@@ -8230,7 +8254,6 @@ void black_top() {
       best_score = beta;
       goto redo;
     }
-    value = black_root(-30000, 30000, depth);
   end:
     if (depth == 2) {
       if (!root_move_list[1].move
@@ -8246,15 +8269,13 @@ int black_root(int alpha, int beta, const int depth) {
   int temp_value;
   int num_moves = 0, count = 0;
   int value, best_value = -32750;
-  type_move_list *p, *q;
+  type_move_list* p, * q;
   const type_position* temp_position = position;
   uint32_t move;
 
-  if (beta > 30000)
-    beta = 30000;
+  beta = (std::min)(beta, 30000);
 
-  if (alpha < -30000)
-    alpha = -30000;
+  alpha = std::max<int64_t>(alpha, -30000);
 
   for (p = root_move_list; p->move; p++) {
     num_moves++;
@@ -8296,8 +8317,7 @@ int black_root(int alpha, int beta, const int depth) {
       if (value > alpha)
         value = -white_pv(-beta, -alpha, new_depth, in_check);
 
-      if (value <= alpha)
-        value = alpha;
+      value = std::max<int64_t>(value, alpha);
     }
     black_undo(move);
 
@@ -8362,20 +8382,20 @@ int black_root(int alpha, int beta, const int depth) {
 
 void white_top() {
   int value, hash_score = 0, move_depth = 0,
-      exact_depth = 0;
+    exact_depth = 0;
   uint32_t move, hash_move = 0, exact_move = 0;
-  type_move_list *p, *q, *move_list;
+  type_move_list* p, * q, * move_list;
   const type_position* temp_position = position;
   const int capture_val[16] =
-    {
-      0, 1, 3, 0, 3, 3, 5, 9, 0, 1, 3, 0, 3, 3, 5, 9
-    };
+  {
+    0, 1, 3, 0, 3, 3, 5, 9, 0, 1, 3, 0, 3, 3, 5, 9
+  };
 
   eval(-0x7fff0000, 0x7fff0000, 0);
 
   if (board.white_to_move
-        ? board.piece[white_king] & position->black_attack
-        : board.piece[black_king] & position->white_attack)
+    ? board.piece[white_king] & position->black_attack
+    : board.piece[black_king] & position->white_attack)
     move_list = white_evasion(root_move_list, 0xffffffffffffffff);
   else {
     q = white_capture(root_move_list, board.piece[occupied_black]);
@@ -8411,8 +8431,8 @@ void white_top() {
     ok_immediate = 0;
 
     if (!(board.white_to_move
-            ? board.piece[white_king] & position->black_attack
-            : board.piece[black_king] & position->white_attack))
+      ? board.piece[white_king] & position->black_attack
+      : board.piece[black_king] & position->white_attack))
       value = white_exclude(hash_score - 50, previous_depth - 6, exact_move);
     else
       value = white_exclude_check(hash_score - 50, previous_depth - 6, exact_move);
@@ -8464,8 +8484,8 @@ void white_top() {
 
   if (!root_move_list[0].move) {
     if (board.white_to_move
-          ? board.piece[white_king] & position->black_attack
-          : board.piece[black_king] & position->white_attack)
+      ? board.piece[white_king] & position->black_attack
+      : board.piece[black_king] & position->white_attack)
       best_score = alpha;
     else
       best_score = 0;
@@ -8520,15 +8540,13 @@ int white_root(int alpha, int beta, const int depth) {
   int temp_value;
   int num_moves = 0, count = 0;
   int value, best_value = -32750;
-  type_move_list *p, *q;
+  type_move_list* p, * q;
   const type_position* temp_position = position;
   uint32_t move;
 
-  if (beta > 30000)
-    beta = 30000;
+  beta = (std::min)(beta, 30000);
 
-  if (alpha < -30000)
-    alpha = -30000;
+  alpha = std::max<int64_t>(alpha, -30000);
 
   for (p = root_move_list; p->move; p++) {
     num_moves++;
@@ -8570,8 +8588,7 @@ int white_root(int alpha, int beta, const int depth) {
       if (value > alpha)
         value = -black_pv(-beta, -alpha, new_depth, in_check);
 
-      if (value <= alpha)
-        value = alpha;
+      value = std::max<int64_t>(value, alpha);
     }
     white_undo(move);
 
@@ -8638,7 +8655,7 @@ int black_pv(int alpha, int beta, int depth, int check_node) {
   type_next next[1];
   type_hash* hash;
   int good_move, value, hash_score, k, i, trans_depth, move, move_depth = 0,
-      trans_move = 0, hash_depth, singular = 0;
+    trans_move = 0, hash_depth, singular = 0;
   int extend, best_value, new_depth, in_check, to;
   type_position* temp_position = position;
 
@@ -8688,8 +8705,7 @@ int black_pv(int alpha, int beta, int depth, int check_node) {
         hash_score = hash->score_high;
       }
 
-      if (trans_depth > hash_depth)
-        hash_depth = trans_depth;
+      hash_depth = std::max<int64_t>(trans_depth, hash_depth);
 
       if (hash->flag & 16 && trans_depth >= depth) {
         hash->age = age;
@@ -8753,7 +8769,7 @@ int black_pv(int alpha, int beta, int depth, int check_node) {
 
         else
           p->move |= (p->move & 0x7fff)
-            | history_table[board.square[(p->move >> 6 & 077)]][(p->move & 077)] << 15;
+          | history_table[board.square[(p->move >> 6 & 077)]][(p->move & 077)] << 15;
       }
       move = p->move;
 
@@ -8792,20 +8808,20 @@ int black_pv(int alpha, int beta, int depth, int check_node) {
 
     if (check_node)
       value = black_exclude_check(hash_score - depth / 2,
-                                  depth - (12 <= depth / 2 ? 12 : depth / 2), move & 0x7fff);
+      depth - (12 <= depth / 2 ? 12 : depth / 2), move & 0x7fff);
     else
       value = black_exclude(hash_score - depth / 2, depth - (12 <= depth / 2 ? 12 : depth / 2),
-                            move & 0x7fff);
+      move & 0x7fff);
 
     if (value < hash_score - depth / 2) {
       singular = 1;
 
       if (check_node)
         value = black_exclude_check(hash_score - depth,
-                                    depth - (12 <= depth / 2 ? 12 : depth / 2), move & 0x7fff);
+        depth - (12 <= depth / 2 ? 12 : depth / 2), move & 0x7fff);
       else
         value = black_exclude(hash_score - depth, depth - (12 <= depth / 2 ? 12 : depth / 2),
-                              move & 0x7fff);
+        move & 0x7fff);
 
       if (value < hash_score - depth)
         singular = 2;
@@ -8848,7 +8864,7 @@ zab:
         || in_check
         || check_node && (position->material & 0xff) >= 18
         || (board.square[to] == black_pawn && to <= h5
-          && (board.piece[white_pawn] & passed_pawn_black[to]) == 0))
+        && (board.piece[white_pawn] & passed_pawn_black[to]) == 0))
         extend = 1;
     }
 
@@ -8882,7 +8898,7 @@ zab:
 
       if (temp_position->score > alpha - 50)
         history_table[board.square[(move >> 6 & 077)]][(move & 077)] =
-          ist - (ist * depth >> 8);
+        ist - (ist * depth >> 8);
     }
 
     if (value <= best_value)
@@ -8940,7 +8956,7 @@ int white_pv(int alpha, int beta, int depth, int check_node) {
   type_next next[1];
   type_hash* hash;
   int good_move, value, hash_score, k, i, trans_depth, move, move_depth = 0,
-      trans_move = 0, hash_depth, singular = 0;
+    trans_move = 0, hash_depth, singular = 0;
   int extend, best_value, new_depth, in_check, to;
   type_position* temp_position = position;
 
@@ -8990,8 +9006,7 @@ int white_pv(int alpha, int beta, int depth, int check_node) {
         hash_score = hash->score_high;
       }
 
-      if (trans_depth > hash_depth)
-        hash_depth = trans_depth;
+      hash_depth = std::max<int64_t>(trans_depth, hash_depth);
 
       if (hash->flag & 16 && trans_depth >= depth) {
         hash->age = age;
@@ -9055,7 +9070,7 @@ int white_pv(int alpha, int beta, int depth, int check_node) {
 
         else
           p->move |= (p->move & 0x7fff)
-            | history_table[board.square[(p->move >> 6 & 077)]][(p->move & 077)] << 15;
+          | history_table[board.square[(p->move >> 6 & 077)]][(p->move & 077)] << 15;
       }
       move = p->move;
 
@@ -9094,20 +9109,20 @@ int white_pv(int alpha, int beta, int depth, int check_node) {
 
     if (check_node)
       value = white_exclude_check(hash_score - depth / 2,
-                                  depth - (12 <= depth / 2 ? 12 : depth / 2), move & 0x7fff);
+      depth - (12 <= depth / 2 ? 12 : depth / 2), move & 0x7fff);
     else
       value = white_exclude(hash_score - depth / 2, depth - (12 <= depth / 2 ? 12 : depth / 2),
-                            move & 0x7fff);
+      move & 0x7fff);
 
     if (value < hash_score - depth / 2) {
       singular = 1;
 
       if (check_node)
         value = white_exclude_check(hash_score - depth,
-                                    depth - (12 <= depth / 2 ? 12 : depth / 2), move & 0x7fff);
+        depth - (12 <= depth / 2 ? 12 : depth / 2), move & 0x7fff);
       else
         value = white_exclude(hash_score - depth, depth - (12 <= depth / 2 ? 12 : depth / 2),
-                              move & 0x7fff);
+        move & 0x7fff);
 
       if (value < hash_score - depth)
         singular = 2;
@@ -9150,7 +9165,7 @@ zab:
         || in_check
         || check_node && (position->material & 0xff) >= 18
         || (board.square[to] == white_pawn && to >= a4
-          && (board.piece[black_pawn] & passed_pawn_white[to]) == 0))
+        && (board.piece[black_pawn] & passed_pawn_white[to]) == 0))
         extend = 1;
     }
 
@@ -9184,7 +9199,7 @@ zab:
 
       if (temp_position->score > alpha - 50)
         history_table[board.square[(move >> 6 & 077)]][(move & 077)] =
-          ist - (ist * depth >> 8);
+        ist - (ist * depth >> 8);
     }
 
     if (value <= best_value)
@@ -9331,7 +9346,7 @@ int black_cut(const int score, const int depth) {
 
   if (depth >= 16 && trans_move && black_ok(trans_move)) {
     value = black_exclude(score - depth, depth - (12 <= depth / 2 ? 12 : depth / 2),
-                          trans_move & 0x7fff);
+      trans_move & 0x7fff);
 
     if (value < score - depth) {
       singular++;
@@ -9340,7 +9355,7 @@ int black_cut(const int score, const int depth) {
       if (height * 4 <= depth)
         singular++;
       value = black_exclude(score - 2 * depth, depth - (12 <= depth / 2 ? 12 : depth / 2),
-                            trans_move & 0x7fff);
+        trans_move & 0x7fff);
 
       if (value < score - 2 * depth) {
         singular++;
@@ -9479,7 +9494,7 @@ int black_cut(const int score, const int depth) {
 
       if (temp_position->score > score - 50)
         history_table[board.square[(move >> 6 & 077)]][(move & 077)] =
-          ist - (ist * depth >> 8);
+        ist - (ist * depth >> 8);
     }
   }
 
@@ -9493,7 +9508,7 @@ int black_cut(const int score, const int depth) {
 int black_cut_check(const int score, const int depth) {
   int move, reduction, extend;
   int move_depth = 0, trans_move = 0, hash_score, new_depth, value, i;
-  type_move_list list[256], *q;
+  type_move_list list[256], * q;
   const uint64_t hash_key = position->hash_key;
   type_position* temp_position = position;
 
@@ -9551,7 +9566,7 @@ int black_cut_check(const int score, const int depth) {
 
   if (depth >= 16 && trans_move) {
     value = black_exclude_check(score - depth, depth - (12 <= depth / 2 ? 12 : depth / 2),
-                                trans_move & 0x7fff);
+      trans_move & 0x7fff);
 
     if (value < score - depth) {
       singular++;
@@ -9560,7 +9575,7 @@ int black_cut_check(const int score, const int depth) {
       if (height * 4 <= depth)
         singular++;
       value = black_exclude_check(score - 2 * depth,
-                                  depth - (12 <= depth / 2 ? 12 : depth / 2), trans_move & 0x7fff);
+        depth - (12 <= depth / 2 ? 12 : depth / 2), trans_move & 0x7fff);
 
       if (value < score - 2 * depth) {
         singular++;
@@ -9593,8 +9608,8 @@ int black_cut_check(const int score, const int depth) {
 
           else
             p->move |= (p->move & 0x7fff)
-              | history_table[board.square[(p->move >> 6 & 077)]][(p->move & 077)]
-              << 15;
+            | history_table[board.square[(p->move >> 6 & 077)]][(p->move & 077)]
+            << 15;
         }
         move = p->move;
 
@@ -9685,8 +9700,7 @@ int black_cut_check(const int score, const int depth) {
   exit_loop:
     black_undo(move);
 
-    if (value > best_value)
-      best_value = value;
+    best_value = std::max<int64_t>(value, best_value);
 
     if (value < score) {
       count++;
@@ -9793,7 +9807,7 @@ int white_cut(const int score, const int depth) {
 
   if (depth >= 16 && trans_move && white_ok(trans_move)) {
     value = white_exclude(score - depth, depth - (12 <= depth / 2 ? 12 : depth / 2),
-                          trans_move & 0x7fff);
+      trans_move & 0x7fff);
 
     if (value < score - depth) {
       singular++;
@@ -9802,7 +9816,7 @@ int white_cut(const int score, const int depth) {
       if (height * 4 <= depth)
         singular++;
       value = white_exclude(score - 2 * depth, depth - (12 <= depth / 2 ? 12 : depth / 2),
-                            trans_move & 0x7fff);
+        trans_move & 0x7fff);
 
       if (value < score - 2 * depth) {
         singular++;
@@ -9940,7 +9954,7 @@ int white_cut(const int score, const int depth) {
 
       if (temp_position->score > score - 50)
         history_table[board.square[(move >> 6 & 077)]][(move & 077)] =
-          ist - (ist * depth >> 8);
+        ist - (ist * depth >> 8);
     }
   }
 
@@ -9954,7 +9968,7 @@ int white_cut(const int score, const int depth) {
 int white_cut_check(const int score, const int depth) {
   int move, reduction, extend;
   int move_depth = 0, trans_move = 0, hash_score, new_depth, value, i;
-  type_move_list list[256], *q;
+  type_move_list list[256], * q;
   const uint64_t hash_key = position->hash_key;
   type_position* temp_position = position;
 
@@ -10012,7 +10026,7 @@ int white_cut_check(const int score, const int depth) {
 
   if (depth >= 16 && trans_move) {
     value = white_exclude_check(score - depth, depth - (12 <= depth / 2 ? 12 : depth / 2),
-                                trans_move & 0x7fff);
+      trans_move & 0x7fff);
 
     if (value < score - depth) {
       singular++;
@@ -10021,7 +10035,7 @@ int white_cut_check(const int score, const int depth) {
       if (height * 4 <= depth)
         singular++;
       value = white_exclude_check(score - 2 * depth,
-                                  depth - (12 <= depth / 2 ? 12 : depth / 2), trans_move & 0x7fff);
+        depth - (12 <= depth / 2 ? 12 : depth / 2), trans_move & 0x7fff);
 
       if (value < score - 2 * depth) {
         singular++;
@@ -10054,8 +10068,8 @@ int white_cut_check(const int score, const int depth) {
 
           else
             p->move |= (p->move & 0x7fff)
-              | history_table[board.square[(p->move >> 6 & 077)]][(p->move & 077)]
-              << 15;
+            | history_table[board.square[(p->move >> 6 & 077)]][(p->move & 077)]
+            << 15;
         }
         move = p->move;
 
@@ -10146,8 +10160,7 @@ int white_cut_check(const int score, const int depth) {
   exit_loop:
     white_undo(move);
 
-    if (value > best_value)
-      best_value = value;
+    best_value = std::max<int64_t>(value, best_value);
 
     if (value < score) {
       count++;
@@ -10358,7 +10371,7 @@ int black_all(const int score, const int depth) {
 
       if (temp_position->score > score - 50)
         history_table[board.square[(move >> 6 & 077)]][(move & 077)] =
-          ist - (ist * depth >> 8);
+        ist - (ist * depth >> 8);
     }
   }
 
@@ -10372,7 +10385,7 @@ int black_all(const int score, const int depth) {
 int black_all_check(const int score, const int depth) {
   int move, extend;
   int move_depth = 0, trans_move = 0, hash_score, new_depth, value, i;
-  type_move_list list[256], *q;
+  type_move_list list[256], * q;
   const uint64_t hash_key = position->hash_key;
   type_position* temp_position = position;
 
@@ -10449,8 +10462,8 @@ int black_all_check(const int score, const int depth) {
 
           else
             p->move |= (p->move & 0x7fff)
-              | history_table[board.square[(p->move >> 6 & 077)]][(p->move & 077)]
-              << 15;
+            | history_table[board.square[(p->move >> 6 & 077)]][(p->move & 077)]
+            << 15;
         }
         move = p->move;
 
@@ -10527,8 +10540,7 @@ int black_all_check(const int score, const int depth) {
   exit_loop:
     black_undo(move);
 
-    if (value > best_value)
-      best_value = value;
+    best_value = std::max<int64_t>(value, best_value);
 
     if (value < score) {
       count++;
@@ -10739,7 +10751,7 @@ int white_all(const int score, const int depth) {
 
       if (temp_position->score > score - 50)
         history_table[board.square[(move >> 6 & 077)]][(move & 077)] =
-          ist - (ist * depth >> 8);
+        ist - (ist * depth >> 8);
     }
   }
 
@@ -10753,7 +10765,7 @@ int white_all(const int score, const int depth) {
 int white_all_check(const int score, const int depth) {
   int move, extend;
   int move_depth = 0, trans_move = 0, hash_score, new_depth, value, i;
-  type_move_list list[256], *q;
+  type_move_list list[256], * q;
   const uint64_t hash_key = position->hash_key;
   type_position* temp_position = position;
 
@@ -10830,8 +10842,8 @@ int white_all_check(const int score, const int depth) {
 
           else
             p->move |= (p->move & 0x7fff)
-              | history_table[board.square[(p->move >> 6 & 077)]][(p->move & 077)]
-              << 15;
+            | history_table[board.square[(p->move >> 6 & 077)]][(p->move & 077)]
+            << 15;
         }
         move = p->move;
 
@@ -10908,8 +10920,7 @@ int white_all_check(const int score, const int depth) {
   exit_loop:
     white_undo(move);
 
-    if (value > best_value)
-      best_value = value;
+    best_value = std::max<int64_t>(value, best_value);
 
     if (value < score) {
       count++;
@@ -11125,7 +11136,7 @@ int black_exclude(const int score, const int depth, const uint32_t mv) {
 
       if (temp_position->score > score - 50)
         history_table[board.square[(move >> 6 & 077)]][(move & 077)] =
-          ist - (ist * depth >> 8);
+        ist - (ist * depth >> 8);
     }
   }
   value = score - 1;
@@ -11136,7 +11147,7 @@ int black_exclude(const int score, const int depth, const uint32_t mv) {
 int black_exclude_check(const int score, const int depth, const uint32_t mv) {
   int move, extend;
   int move_depth = 0, trans_move = 0, hash_score, new_depth, value, i;
-  type_move_list list[256], *q;
+  type_move_list list[256], * q;
   uint64_t hash_key = position->hash_key;
   type_position* temp_position = position;
 
@@ -11217,8 +11228,8 @@ int black_exclude_check(const int score, const int depth, const uint32_t mv) {
 
           else
             p->move |= (p->move & 0x7fff)
-              | history_table[board.square[(p->move >> 6 & 077)]][(p->move & 077)]
-              << 15;
+            | history_table[board.square[(p->move >> 6 & 077)]][(p->move & 077)]
+            << 15;
         }
         move = p->move;
 
@@ -11298,8 +11309,7 @@ int black_exclude_check(const int score, const int depth, const uint32_t mv) {
   exit_loop:
     black_undo(move);
 
-    if (value > best_value)
-      best_value = value;
+    best_value = std::max<int64_t>(value, best_value);
 
     if (value < score) {
       count++;
@@ -11516,7 +11526,7 @@ int white_exclude(const int score, const int depth, const uint32_t mv) {
 
       if (temp_position->score > score - 50)
         history_table[board.square[(move >> 6 & 077)]][(move & 077)] =
-          ist - (ist * depth >> 8);
+        ist - (ist * depth >> 8);
     }
   }
   value = score - 1;
@@ -11527,7 +11537,7 @@ int white_exclude(const int score, const int depth, const uint32_t mv) {
 int white_exclude_check(const int score, const int depth, const uint32_t mv) {
   int move, extend;
   int move_depth = 0, trans_move = 0, hash_score, new_depth, value, i;
-  type_move_list list[256], *q;
+  type_move_list list[256], * q;
   uint64_t hash_key = position->hash_key;
   type_position* temp_position = position;
 
@@ -11608,8 +11618,8 @@ int white_exclude_check(const int score, const int depth, const uint32_t mv) {
 
           else
             p->move |= (p->move & 0x7fff)
-              | history_table[board.square[(p->move >> 6 & 077)]][(p->move & 077)]
-              << 15;
+            | history_table[board.square[(p->move >> 6 & 077)]][(p->move & 077)]
+            << 15;
         }
         move = p->move;
 
@@ -11689,8 +11699,7 @@ int white_exclude_check(const int score, const int depth, const uint32_t mv) {
   exit_loop:
     white_undo(move);
 
-    if (value > best_value)
-      best_value = value;
+    best_value = std::max<int64_t>(value, best_value);
 
     if (value < score) {
       count++;
@@ -11874,15 +11883,14 @@ int black_low(const int score, const int depth) {
       return value;
     }
 
-    if (value >= best_value)
-      best_value = value;
+    best_value = std::max<int64_t>(value, best_value);
 
     if ((temp_position + 1)->capture == 0 && (move & 060000) == 0) {
       const int ist = history_table[board.square[(move >> 6 & 077)]][(move & 077)];
 
       if (temp_position->score > score - 50)
         history_table[board.square[(move >> 6 & 077)]][(move & 077)] =
-          ist - (ist * depth >> 8);
+        ist - (ist * depth >> 8);
     }
   }
 
@@ -11894,8 +11902,8 @@ int black_low(const int score, const int depth) {
 
 int black_low_check(const int score, const int depth) {
   int trans_move = 0, move_depth = 0, hash_score, i, move,
-      value;
-  type_move_list list[256], *q;
+    value;
+  type_move_list list[256], * q;
   const type_position* temp_position = position;
 
   if (position->reversible >= 100)
@@ -11964,8 +11972,8 @@ int black_low_check(const int score, const int depth) {
 
           else
             p->move |= (p->move & 0xffff)
-              | history_table[board.square[(p->move >> 6 & 077)]][(p->move & 077)] >> 1
-              << 16;
+            | history_table[board.square[(p->move >> 6 & 077)]][(p->move & 077)] >> 1
+            << 16;
         }
         move = p->move;
 
@@ -12201,15 +12209,14 @@ int white_low(const int score, const int depth) {
       return value;
     }
 
-    if (value >= best_value)
-      best_value = value;
+    best_value = std::max<int64_t>(value, best_value);
 
     if ((temp_position + 1)->capture == 0 && (move & 060000) == 0) {
       const int ist = history_table[board.square[(move >> 6 & 077)]][(move & 077)];
 
       if (temp_position->score > score - 50)
         history_table[board.square[(move >> 6 & 077)]][(move & 077)] =
-          ist - (ist * depth >> 8);
+        ist - (ist * depth >> 8);
     }
   }
 
@@ -12221,8 +12228,8 @@ int white_low(const int score, const int depth) {
 
 int white_low_check(const int score, const int depth) {
   int trans_move = 0, move_depth = 0, hash_score, i, move,
-      value;
-  type_move_list list[256], *q;
+    value;
+  type_move_list list[256], * q;
   const type_position* temp_position = position;
 
   if (position->reversible >= 100)
@@ -12291,8 +12298,8 @@ int white_low_check(const int score, const int depth) {
 
           else
             p->move |= (p->move & 0xffff)
-              | history_table[board.square[(p->move >> 6 & 077)]][(p->move & 077)] >> 1
-              << 16;
+            | history_table[board.square[(p->move >> 6 & 077)]][(p->move & 077)] >> 1
+            << 16;
         }
         move = p->move;
 
@@ -12507,7 +12514,7 @@ int black_qsearch(const int score, const int depth) {
 
 int black_qsearch_check(const int score, int depth) {
   int hash_score, i, value,
-      move_depth = 0;
+    move_depth = 0;
   const int k = position->hash_key & hash_mask;
   type_move_list list[256];
   uint32_t move, trans_move = 0;
@@ -12789,7 +12796,7 @@ int white_qsearch(const int score, const int depth) {
 
 int white_qsearch_check(const int score, int depth) {
   int hash_score, i, value,
-      move_depth = 0;
+    move_depth = 0;
   const int k = position->hash_key & hash_mask;
   type_move_list list[256];
   uint32_t move, trans_move = 0;
@@ -12923,7 +12930,7 @@ int white_qsearch_check(const int score, int depth) {
 int black_qsearch_pv(int alpha, const int beta, const int depth) {
   int i;
   uint32_t good_move = 0, trans_move = 0, move, bad_captures[64],
-           move_depth = 0;
+    move_depth = 0;
   int hash_score;
   type_move_list list[256];
   int value;
@@ -13294,7 +13301,7 @@ int black_qsearch_pv_check(int alpha, const int beta, int depth) {
 int white_qsearch_pv(int alpha, const int beta, const int depth) {
   int i;
   uint32_t good_move = 0, trans_move = 0, move, bad_captures[64],
-           move_depth = 0;
+    move_depth = 0;
   int hash_score;
   type_move_list list[256];
   int value;

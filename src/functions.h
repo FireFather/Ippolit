@@ -68,12 +68,11 @@ type_move_list* white_check(type_move_list*, uint64_t);
 
 type_move_list* white_gain(type_move_list*, int);
 type_move_list* black_gain(type_move_list*, int);
-static type_move_list root_move_list[256];
 
 uint8_t get_input();
 
-uint8_t white_ok(uint32_t move);
-uint8_t black_ok(uint32_t move);
+uint8_t white_ok(uint32_t);
+uint8_t black_ok(uint32_t);
 uint8_t white_see(uint32_t);
 uint8_t black_see(uint32_t);
 
@@ -81,7 +80,6 @@ uint32_t white_next(type_next*);
 uint32_t black_next(type_next*);
 uint32_t completed_move(uint32_t);
 
-uint64_t get_time();
 uint64_t compute_material_value(int, int, int, int, int, int, int, int, int, int);
 
 void eval_mobility();
@@ -124,9 +122,9 @@ void parse(char*);
 void read_fen(const char*);
 void uci();
 void readyok();
-void read_move(const char* string);
+void read_move(const char*);
 
-void setup_search(char*);
+void setup_search(const char*);
 void search();
 void check_if_done(int);
 void halt_search();
